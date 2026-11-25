@@ -167,6 +167,32 @@ int main() {
             assert(bootstrapDDI(w,true,3,3,trans,true)==UINT32_MAX);
         }
     }
+    // A record copied from a different active DDI must not bind to this slot,
+    // even though its transport and DDC fields match another valid route.
+    for(unsigned mask=1;mask<128;++mask)if(!(mask&~Display13OutputWiring::Physical)) {
+        Display13OutputWiring w;w.valid=true;w.hdmi=mask;
+        for(unsigned d=0;d<7;++d)if(mask&(1U<<d))w.ddc[d]=d<2?d+1:d+6;
+        Platform in,out;
+        assert(apply(out.data(),Bytes,in.data(),w));
+        for(unsigned d=0;d<Ports;++d)if(mask&(1U<<d))
+            for(unsigned peer=0;peer<Ports;++peer)if(peer!=d && (mask&(1U<<peer))) {
+                auto bad=out;
+                memcpy(bad.config(d),out.config(peer),24);
+                assert(!selected(bad.data(),bad.config(d),w));
+                assert(!boundPorts(bad.data(),w).valid());
+                assert(!excludedHotplug(bad.data(),Bytes,w));
+            }
+        auto bad=out;bad.data()[0x12]=Ports-1;
+        assert(!boundPorts(bad.data(),w).valid());
+        bad.data()[0x12]=Ports+1;
+        assert(!boundPorts(bad.data(),w).valid());
+        // Native bytes may be unaligned in an offline snapshot; decoding
+        // must not perform unaligned uint32_t reads (UBSan checks this).
+        alignas(uint64_t) uint8_t raw[Bytes+1];
+        auto bytes=raw+1;memcpy(bytes,out.data(),Bytes);
+        assert(boundPorts(bytes,w).valid());
+        assert(excludedHotplug(bytes,Bytes,w)==excludedHotplug(out.data(),Bytes,w));
+    }
     // A failure on the last selected predecessor must not publish a copy.
     {const uint32_t prop[]={1,7,1,2,3};const auto w=TGLHDMIWiring::fromProperty(prop,sizeof(prop));
      Platform in,out;memset(out.data(),0x5a,Bytes);auto saved=out;in.config(2)[2]=0;
