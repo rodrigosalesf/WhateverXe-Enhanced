@@ -9,7 +9,7 @@ let source = """
 using namespace metal;
 kernel void wex_probe(device uint *output [[buffer(0)]],
                       uint index [[thread_position_in_grid]]) {
-    output[index] = (index * 17u) ^ 0x5a5au;
+    if (index < 256u) output[index] = (index * 17u) ^ 0x5a5au;
 }
 """
 
@@ -34,9 +34,9 @@ func probe(_ device: MTLDevice) throws {
     encoder.setComputePipelineState(pipeline)
     encoder.setBuffer(output, offset: 0, index: 0)
     let width = max(1, min(pipeline.threadExecutionWidth, pipeline.maxTotalThreadsPerThreadgroup, count))
-    // One-dimensional exact grid; supported by Metal devices on target macOS.
-    encoder.dispatchThreads(MTLSize(width: count, height: 1, depth: 1),
-                            threadsPerThreadgroup: MTLSize(width: width, height: 1, depth: 1))
+    // Use uniform groups even on devices without nonuniform dispatch support.
+    encoder.dispatchThreadgroups(MTLSize(width: (count + width - 1) / width, height: 1, depth: 1),
+                                 threadsPerThreadgroup: MTLSize(width: width, height: 1, depth: 1))
     encoder.endEncoding()
     let done = DispatchSemaphore(value: 0)
     command.addCompletedHandler { _ in done.signal() }
