@@ -291,6 +291,15 @@ int main() {
      assert(scopes.end(other) && !scopes.head && !scopes.total && !scopes.display);
      assert(!scopes.end(other) && !scopes.begin(other,0,true));
     }
+    // Idempotent enable must reject inaccessible master readback and retain
+    // the fault address instead of reporting a successful wake.
+    for(auto reg:{Master,GfxMaster}) {
+        IO io;State state;assert(enable(io,state)==Status::Complete);
+        io.r[reg]=UINT32_MAX;io.writes.clear();
+        assert(enable(io,state)==Status::Readback && state.faulted && !state.enabled);
+        assert(state.failureRegister==reg && state.failureBits==UINT32_MAX);
+        assert(io.writes==std::vector<uint32_t>{Master});
+    }
     // Explicit DDI B -> pipe B must leave a live pipe A and its pending
     // notification untouched. The legacy default incorrectly selects A.
     {IO mapped;State state;state.active=1;mapped.r[Master]=1U<<16;
