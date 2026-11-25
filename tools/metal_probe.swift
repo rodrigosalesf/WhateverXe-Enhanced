@@ -46,7 +46,7 @@ func completedTiming(_ command: MTLCommandBuffer, _ timeoutMessage: String) thro
                       userInfo: [NSLocalizedDescriptionKey: "command-failed"])
     }
     let gpuStart = command.gpuStartTime, gpuEnd = command.gpuEndTime
-    let gpu = gpuStart.isFinite && gpuEnd.isFinite && gpuStart > 0 && gpuEnd > gpuStart
+    let gpu: Double? = gpuStart.isFinite && gpuEnd.isFinite && gpuStart > 0 && gpuEnd > gpuStart
         ? (gpuEnd - gpuStart) * 1000 : nil
     return Timing(hostMs: Double(end - start) / 1_000_000, gpuMs: gpu)
 }
