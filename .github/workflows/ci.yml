@@ -1,131 +1,100 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-    tags: ['*']
-  pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  actions: read
+  contents: write
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  group: publish-enhanced-e4
+  cancel-in-progress: false
 
 jobs:
-  build:
-    name: Test and build
-    runs-on: macos-15-intel
-    timeout-minutes: 30
+  publish-e4:
+    if: github.repository == 'rodrigosalesf/WhateverXe-Enhanced' && github.ref == 'refs/heads/publish-e4'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_COMMIT: 'c24d6d8bc8e3b98977eab4e146c8d26463a0d338'
+      RELEASE_TAG: 'v0.8.5-enhanced-e4'
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: acidanthera/MacKernelSDK
-          ref: 05094e5e88cec7caedbfb35e8449ed0db94bf95b
-          path: MacKernelSDK
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: acidanthera/Lilu
-          ref: 1.7.2
-          path: build/dependencies/Lilu
-          persist-credentials: false
-      - name: Prepare Lilu development files
-        shell: bash
-        run: |
-          mkdir -p Lilu.kext/Contents/Resources
-          ln -s "$GITHUB_WORKSPACE/build/dependencies/Lilu/Lilu/Headers" Lilu.kext/Contents/Resources/Headers
-          ln -s "$GITHUB_WORKSPACE/build/dependencies/Lilu/Lilu/Library" Lilu.kext/Contents/Resources/Library
-      - name: CPU tests
-        run: python3 tools/test.py
-      - name: Compile Metal diagnostics (no GPU execution on CI)
-        run: |
-          mkdir -p build/diagnostics
-          xcrun swiftc -swift-version 5 -target x86_64-apple-macos11.0 tools/metal_probe.swift -o build/diagnostics/metal_probe
-      - name: Verify Metal diagnostic host-only logic
+      - name: Find and verify approved CI 21
         shell: bash
         run: |
           set -euo pipefail
-          probe=build/diagnostics/metal_probe
-          "$probe" --self-test
-          for n in 0 1001 invalid; do
-            status=0
-            "$probe" --iterations "$n" || status=$?
-            test "$status" -eq 2
-          done
-          status=0
-          "$probe" --iterations 1 --iterations 2 || status=$?
-          test "$status" -eq 2
-      - name: Build DEBUG
-        run: python3 tools/build.py --output build/DEBUG
-      - name: Build RELEASE
-        run: python3 tools/build.py --release --output build/RELEASE
-      - name: Package
+          run_id="$(gh run list --workflow ci.yml --branch enhanced-e4 --commit "$BUILD_COMMIT" --limit 30 --json databaseId,number,headSha,headBranch,status,conclusion,event --jq '[.[] | select(.number == 21 and .status == "completed" and .conclusion == "success" and .event == "workflow_dispatch")] | if length == 1 then .[0].databaseId else empty end')"
+          test -n "$run_id"
+          gh run view "$run_id" --json headSha,headBranch,status,conclusion,number,event | jq -e --arg sha "$BUILD_COMMIT" '.headSha == $sha and .headBranch == "enhanced-e4" and .status == "completed" and .conclusion == "success" and .number == 21 and .event == "workflow_dispatch"'
+          echo "BUILD_RUN=$run_id" >> "$GITHUB_ENV"
+      - name: Download and verify packages
         shell: bash
-        env:
-          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
-          python3 tools/package.py --build build/DEBUG --configuration DEBUG --tag "$RELEASE_TAG"
-          python3 tools/package.py --build build/RELEASE --configuration RELEASE --tag "$RELEASE_TAG"
-          cd build/dist
-          shasum -a 256 *.zip > SHA256SUMS
-      - name: Upload packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: Artifacts
-          path: build/dist/*
-          if-no-files-found: error
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Test-results
-          path: |
-            build/tests/**/test.log
-            build/tests/**/results.json
-          if-no-files-found: ignore
-          retention-days: 14
-
-  release:
-    name: Create draft release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'b00t0x/WhateverXe'
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@v4
-        with:
-          name: Artifacts
-          path: dist
-      - name: Attach verified build artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          if gh release view "$RELEASE_TAG" --json isDraft,body \
-              --jq 'select(.isDraft == true) | .body' > release-notes.md && test -s release-notes.md; then
-            : # Preserve release text explicitly supplied with the draft.
-          else
-            python3 tools/release_notes.py "$RELEASE_TAG" > release-notes.md
-          fi
+          set -euo pipefail
+          gh run download "$BUILD_RUN" --name Artifacts --dir dist
           cd dist
+          test -f WhateverXe-0.8.5-DEBUG.zip
+          test -f WhateverXe-0.8.5-RELEASE.zip
+          test -f SHA256SUMS
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 3
           sha256sum -c SHA256SUMS
-          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > release-state; then
-            test "$(cat release-state)" = true
-          else
-            gh release create "$RELEASE_TAG" --verify-tag --draft \
-              --title "$RELEASE_TAG" --notes-file ../release-notes.md
+          grep -Eq '^[[:xdigit:]]{64} [ *]WhateverXe-0\.8\.5-DEBUG\.zip$' SHA256SUMS
+          grep -Eq '^[[:xdigit:]]{64} [ *]WhateverXe-0\.8\.5-RELEASE\.zip$' SHA256SUMS
+      - name: Attach exact Metal diagnostic source
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github.raw+json' "repos/$GH_REPO/contents/tools/metal_probe.swift?ref=$BUILD_COMMIT" > dist/metal_probe.swift
+          test "$(git hash-object dist/metal_probe.swift)" = '2639dc9e2b2b464217ebc9649ef5d6e864f0da4c'
+          cd dist
+          sha256sum metal_probe.swift >> SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - name: Publish experimental prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'NOTES'
+          ## WhateverXe Enhanced E4 — Metal & Rendering Engine (0.8.5)
+
+          Experimental prerelease based on WhateverXe 0.8.5, incorporating Enhanced E1–E3. Use the original compatible WhateverXe Graphics 0.4.5 package; this release does not replace or modify it.
+
+          ### Enhanced changelog
+          - E4.1 — Revoke decoded GT capacities after unsuccessful hardware sampling or ForceWake release; preserve raw observations for diagnostics.
+          - E4.2 — Add vertex/fragment shader compilation, offscreen rendering and pixel-by-pixel GPU readback verification to the standalone Metal probe.
+          - E4.3 — Validate native framebuffer allocation bitmaps and reject ownership changes detected during GGTT inspection.
+          - E4.4 — Avoid redundant writes to already configured RCS context fields; test idempotence and GGTT boundaries.
+          - E4.5 — Reject inaccessible all-ones MMIO reads and empty reset domains before reporting successful reset polling; retain bounded recovery and cleanup.
+          - E4.6 — Add 1–1000 repeated compute/render micro-workloads, changing inputs, output verification and host/GPU latency statistics (min, median, p95, max when available). Add host-only statistics and argument checks in CI.
+
+          ### Assets
+          - DEBUG and RELEASE ZIPs: the exact CI #21 packages, with symbols and original bundle identity.
+          - metal_probe.swift: standalone diagnostic source from the exact approved commit; not an additional kext or a precompiled executable.
+          - SHA256SUMS: ZIP and diagnostic-source checksums.
+
+          ### Diagnostic usage
+          On the target macOS with Xcode command-line tools:
+          ```sh
+          xcrun swiftc -swift-version 5 metal_probe.swift -o metal_probe
+          ./metal_probe --iterations 100
+          ```
+          For multiple GPUs, use --registry-id with the target GPU's actual registry ID. The probe measures small workloads, not FPS or peak throughput. Stop testing on errors or hangs; keep a separate recovery EFI.
+
+          ### Validation and limits
+          CI #16–#21 reported success. The publisher verifies CI #21's exact source commit and package checksums before creating the prerelease. CI compiles the Metal probe and exercises host-only logic, not real GPU workloads. Optional native binary tests requiring external inputs are not claimed to have run. No physical hardware qualification, measured performance improvement, complete Metal support, video codec improvement, or Tahoe runtime guarantee is claimed. Do not load WhateverGreen together with WhateverXe.
+
+          Source: c24d6d8bc8e3b98977eab4e146c8d26463a0d338
+          NOTES
+          printf '\nBuild: https://github.com/%s/actions/runs/%s\n' "$GH_REPO" "$BUILD_RUN" >> release-notes.md
+          # Refuse to publish over an existing tag or release.
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists; refusing overwrite" >&2
+            exit 1
           fi
-          gh release edit "$RELEASE_TAG" --notes-file ../release-notes.md
-          gh release upload "$RELEASE_TAG" ./*.zip SHA256SUMS --clobber
+          if gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag already exists; refusing overwrite" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" dist/WhateverXe-0.8.5-DEBUG.zip dist/WhateverXe-0.8.5-RELEASE.zip dist/SHA256SUMS dist/metal_probe.swift --target "$BUILD_COMMIT" --title "WhateverXe Enhanced E4 (0.8.5)" --prerelease --notes-file release-notes.md
