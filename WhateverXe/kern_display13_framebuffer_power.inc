@@ -128,7 +128,7 @@ bool XE::ownedDisplay13Framebuffer(IOService *fb) const {
 }
 
 bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
-    if(!display13FramebufferEvent || !caller)return false;
+    if(!display13FramebufferEvent || !caller || caller->getMetaClass()->getClassSize()<0x4B90)return false;
     auto controller=Display13FBMemory::field<IOService *>(caller,0x1D0);
     if(!controller || controller!=adlnTopologyController || controller->getMetaClass()->getClassSize()<0x1C20)return false;
     auto &c=display13FBPower;
