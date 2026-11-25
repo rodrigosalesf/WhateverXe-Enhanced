@@ -3,6 +3,7 @@
 #include <map>
 #include <vector>
 #include <cstdio>
+#include <cstring>
 #include "kern_alderlake_n.hpp"
 #include "kern_alderlake_n_gpu.hpp"
 struct IO {
@@ -190,6 +191,12 @@ int main() {
         using S=AlderLakeN::GTStatus;
         const S expected[]={S::Complete,S::AckTimeout,S::ReleaseFailed,S::Unavailable,S::ProfileMismatch};
         assert(a.status==expected[failure]);
+        const char *labels[]={"capacity-decoded","forcewake-timeout","forcewake-release-failed","readout-unavailable","media-mismatch"};
+        assert(!strcmp(AlderLakeN::mobileTopologyDiagnostic(a),labels[failure]));
+        if(!failure) {
+            auto incomplete=a;incomplete.releasedMask=1;
+            assert(!strcmp(AlderLakeN::mobileTopologyDiagnostic(incomplete),"ownership-incomplete"));
+        }
         if(!failure)assert(a.resources.eus==96 && a.resources.nativeSubslices==12 &&
             a.resources.l3Banks==8 && a.resources.urbKiB==512 && a.releasedMask==3);
     }

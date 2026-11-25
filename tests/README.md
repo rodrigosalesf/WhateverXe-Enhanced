@@ -42,6 +42,14 @@ EDRAM register prevents forcewake acquisition. Callers not requesting EDRAM
 retain the existing path. Hardware MMIO, IOKit property publication and actual
 GPU execution remain unverified.
 
+The E2 follow-up extends `adlp_resources` and `alderlake_n` with explicit
+mobile fuse rejection reasons and ownership-failure diagnostics. The decoder
+retains its existing capacity admission and the GT readout layout is unchanged.
+`framebuffer_common` checks the new diagnostic property on entry mismatch,
+route failure, common/backend failure and hook installation, independently of
+native startup success. These are CPU fixtures; neither successful sampling nor
+hook installation demonstrates working acceleration or hardware qualification.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched

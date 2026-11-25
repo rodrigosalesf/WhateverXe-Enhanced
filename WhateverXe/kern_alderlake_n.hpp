@@ -42,6 +42,18 @@ struct Register { uint32_t offset {}, value {}; };
 enum class GTStatus : uint32_t {
     NotAdmitted, ExistingOwner, AckTimeout, Unavailable, ProfileMismatch, ReleaseFailed, Complete
 };
+inline const char *gtStatusName(GTStatus status) {
+    switch(status) {
+        case GTStatus::NotAdmitted:return "not-admitted";
+        case GTStatus::ExistingOwner:return "existing-owner";
+        case GTStatus::AckTimeout:return "forcewake-timeout";
+        case GTStatus::Unavailable:return "readout-unavailable";
+        case GTStatus::ProfileMismatch:return "profile-mismatch";
+        case GTStatus::ReleaseFailed:return "forcewake-release-failed";
+        case GTStatus::Complete:return "readout-complete";
+    }
+    return "unknown";
+}
 struct GTReadout {
     uint32_t version {1};
     GTStatus status {GTStatus::NotAdmitted};
@@ -53,6 +65,13 @@ struct GTReadout {
     Register registers[16] {};
 };
 static_assert(sizeof(GTReadout)==60*4,"AlderLakeN GT readout layout");
+// Never present capacity from a failed or incomplete ownership transaction.
+inline const char *mobileTopologyDiagnostic(const GTReadout &gt) {
+    if(gt.status!=GTStatus::Complete && gt.status!=GTStatus::ProfileMismatch)return gtStatusName(gt.status);
+    if(gt.requestedMask!=3 || gt.releasedMask!=3 || gt.releaseFailedMask)return "ownership-incomplete";
+    Resources decoded;
+    return XELP::mobileGTStatusName(XELP::inspectMobileGT(gt.fuses,decoded));
+}
 
 // Linux v6.12 gen12 forcewake domains: fuses and BCS are GT, RCS is render.
 // Only acquire an unowned kernel bit0. Never reset domains or alter engines.

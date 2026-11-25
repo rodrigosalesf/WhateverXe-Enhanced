@@ -54,18 +54,40 @@ inline VideoEngine primaryMobileVideoEngine(uint32_t mediaDisable) {
 // TGL GT2 and ADL-P/U share the Xe-LP fuse encoding and donor backend,
 // with up to six DSS and eight L3 banks. Capacity is independent of VCS choice.
 // The donor URB backend handles 4/6/8 banks; reject unsupported capacities.
-inline bool decodeMobileGT(const uint32_t *fuses, GTResources &out) {
+enum class MobileGTStatus : uint32_t {
+    Complete, Unavailable, SliceMismatch, NoDSS, MediaMismatch, EUMismatch, L3Mismatch
+};
+// Report the first failed existing capacity check; do not broaden admission.
+inline MobileGTStatus inspectMobileGT(const uint32_t *fuses, GTResources &out) {
     out={};
-    if(!fuses)return false;
-    for(unsigned i=0;i<5;++i)if(fuses[i]==UINT32_MAX)return false;
+    if(!fuses)return MobileGTStatus::Unavailable;
+    for(unsigned i=0;i<5;++i)if(fuses[i]==UINT32_MAX)return MobileGTStatus::Unavailable;
     const auto slice=fuses[0]&0xFF,mask=fuses[1]&0x3F;
-    if(slice!=1 || !mask || primaryMobileVideoEngine(fuses[4])==VideoEngine::Unavailable)return false;
+    if(slice!=1)return MobileGTStatus::SliceMismatch;
+    if(!mask)return MobileGTStatus::NoDSS;
+    if(primaryMobileVideoEngine(fuses[4])==VideoEngine::Unavailable)return MobileGTStatus::MediaMismatch;
     const auto dss=static_cast<uint32_t>(__builtin_popcount(mask));
     const auto perDSS=2*(8-static_cast<uint32_t>(__builtin_popcount(fuses[2]&0xFF)));
     const auto banks=8-static_cast<uint32_t>(__builtin_popcount(fuses[3]&0xFF));
-    if((perDSS!=8 && perDSS!=12 && perDSS!=16) || (banks!=4 && banks!=6 && banks!=8))return false;
+    if(perDSS!=8 && perDSS!=12 && perDSS!=16)return MobileGTStatus::EUMismatch;
+    if(banks!=4 && banks!=6 && banks!=8)return MobileGTStatus::L3Mismatch;
     out={1,dss,2*dss,dss*perDSS,banks,64*banks};
-    return true;
+    return MobileGTStatus::Complete;
+}
+inline bool decodeMobileGT(const uint32_t *fuses, GTResources &out) {
+    return inspectMobileGT(fuses,out)==MobileGTStatus::Complete;
+}
+inline const char *mobileGTStatusName(MobileGTStatus status) {
+    switch(status) {
+        case MobileGTStatus::Complete:return "capacity-decoded";
+        case MobileGTStatus::Unavailable:return "fuses-unavailable";
+        case MobileGTStatus::SliceMismatch:return "slice-mismatch";
+        case MobileGTStatus::NoDSS:return "no-dss";
+        case MobileGTStatus::MediaMismatch:return "media-mismatch";
+        case MobileGTStatus::EUMismatch:return "eu-mismatch";
+        case MobileGTStatus::L3Mismatch:return "l3-mismatch";
+    }
+    return "unknown";
 }
 
 }
