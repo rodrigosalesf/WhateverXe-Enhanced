@@ -40,6 +40,20 @@ struct IO {
 };
 int main() {
     const Conditions ready {true,true,1};
+    // A polling budget is measured in microseconds, not rounded up to a 10us poll.
+    for(unsigned budget : {0U,1U,9U,10U,11U,17U,499U,500U}) {
+        IO io;io.regs[Mailbox]=0x80000000;Change r;
+        assert(!wait(io,r,Mailbox,1U<<31,0,budget));
+        assert(r.delayUs==budget && io.delays==budget && io.writes.empty());
+    }
+    // A prior command that becomes idle on the last poll must not consume
+    // another command's timeout or submit after the entire budget is spent.
+    {IO io;io.regs[Mailbox]=0x80000000;io.pollsLeft=3;Change r;
+     assert(!mailbox(io,r,3,10) && r.status==ChangeStatus::MailboxTimeout);
+     assert(r.delayUs==10 && io.writes.empty());}
+    {IO io;io.regs[Mailbox]=0x80000000;io.pollsLeft=3;Change r;
+     assert(mailbox(io,r,3,11) && r.delayUs==10 && io.writes.size()==3);}
+
     for(unsigned id:{0xa721U,0xa7a1U,0xa7a9U,0xa7acU,0xa7adU})
         assert(variantForPCI((id<<16)|0x8086)==Variant::RPLU);
     assert(variantForPCI(0xa7a88086)==Variant::ADLP);

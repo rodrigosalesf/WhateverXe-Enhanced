@@ -11,7 +11,7 @@ int main() {
   assert(!mmioPages(base,base+4096,0x1000000,0x1000000,first,end));
   assert(!mmioPages(base,base,0x1000000,0x1000,first,end));
  }
- for(auto base:{0ULL,1ULL,UINT64_MAX,0xFFFFFFFF000ULL})
+ for(uint64_t base:std::initializer_list<uint64_t>{0,1,UINT64_MAX,0xFFFFFFFF000ULL})
   assert(!mmioPages(base,base,0x1000000,0x1000000,first,end));
  unsigned cases=0;
  for(unsigned gms=1;gms<255;++gms)for(unsigned ggms=1;ggms<4;++ggms) {

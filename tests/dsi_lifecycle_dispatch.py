@@ -10,6 +10,7 @@ functions='\n'.join(re.search(r'(?:static bool|uint32_t|void) (?:XE::)?'+name+r'
 code=r'''
 #include "kern_display13_fb_memory.hpp"
 #include "kern_display13_cursor.hpp"
+#include "kern_sleepable_delay.hpp"
 #include "kern_display13_tc_lightup.hpp"
 #include <cassert>
 #include <cstdio>
@@ -21,6 +22,7 @@ unsigned depth=0,bindingCalls=0,modeCalls=0,stopCalls=0,notifications=0,modeResu
 void IOLockLock(IOLock*){assert(!depth);++depth;}void IOLockUnlock(IOLock*){assert(depth==1);--depth;}
 void adlnFault(bool &v,unsigned){assert(depth==1);v=true;}
 void IOSleep(unsigned){assert(false);}
+void IODelay(unsigned){assert(false);}
 struct IOMemoryMap {uintptr_t getVirtualAddress(){assert(false);return 0;}size_t getLength(){return 0;}};
 struct {IOLock *lock=nullptr;IOService *controller=nullptr;IOMemoryMap *map=nullptr;bool memoryFaulted=false,clockFaulted=false;
  struct {struct {bool faulted=false;}state;}bridge;struct {unsigned updating=0;}dbuf;

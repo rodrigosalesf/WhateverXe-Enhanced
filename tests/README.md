@@ -12,6 +12,20 @@ the mandatory local dependencies of each OS's actual VA driver and exercises
 the production WebKit GPU access decision for their installed paths. The
 kernel signing queries are modeled. Safari playback requires a separate test.
 
+## Enhanced experimental checks
+
+`sleepable_delay` extracts the three real thread-context delay methods from
+`kern_xe.cpp`. Modeled IOSleep and IODelay must account for the complete
+requested interval, including zero, sub-millisecond and remainder values.
+No IRQ context, actual elapsed wall time or scheduler behavior is verified.
+`display13_clock_set` additionally tests odd polling budgets and an existing
+PCODE command completing at the deadline: no new command may be submitted
+when that wait has spent the entire budget. Existing clock state transitions
+remain covered. `display13_panel_runtime` checks that off/inaccessible PPS
+status cannot authorize AUX brightness writes and releases temporary refs.
+Its actual donor binary replay is separately optional. These checks preserve
+hardware, donor and native ownership admission and are not qualification.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched
