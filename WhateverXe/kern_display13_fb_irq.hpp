@@ -153,8 +153,14 @@ template<class IO> Status enable(IO &io,State &s,uint32_t excludedPCH=0,uint32_t
     // completion or undo hwSetInterruptForTransaction's VBL mask.
     if(s.enabled && excludedPCH!=s.excludedPCH)return fail(io,s,Status::Topology);
     if(s.enabled && s.active && s.active!=expectedPipes)return fail(io,s,Status::Topology);
-    if(s.enabled && s.active)return (io.read(Master)&Enable) && (io.read(GfxMaster)&Enable) ?
-        Status::Complete : fail(io,s,Status::Readback);
+    if(s.enabled && s.active) {
+        // All-ones MMIO is an inaccessible register, not an enabled master.
+        // Repeated enable must not report successful recovery on lost power.
+        const auto master=io.read(Master),gfx=io.read(GfxMaster);
+        if(master==UINT32_MAX)return fail(io,s,Status::Readback,Master,master);
+        if(gfx==UINT32_MAX)return fail(io,s,Status::Readback,GfxMaster,gfx);
+        return (master&Enable) && (gfx&Enable) ? Status::Complete : fail(io,s,Status::Readback);
+    }
     auto wells=io.read(Driver);
     if(dsi && !powered(wells,s.transcoders.dsi0Pipe))return fail(io,s,Status::Power);
     for(unsigned p=0;p<3;++p)if((expectedPipes&(1U<<p)) && !powered(wells,p))return fail(io,s,Status::Power);
