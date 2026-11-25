@@ -1,113 +1,46 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-    tags: ['*']
-  pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: read
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  actions: read
+  contents: write
 
 jobs:
-  build:
-    name: Test and build
-    runs-on: macos-15-intel
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: acidanthera/MacKernelSDK
-          ref: 05094e5e88cec7caedbfb35e8449ed0db94bf95b
-          path: MacKernelSDK
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: acidanthera/Lilu
-          ref: 1.7.2
-          path: build/dependencies/Lilu
-          persist-credentials: false
-      - name: Prepare Lilu development files
-        shell: bash
-        run: |
-          mkdir -p Lilu.kext/Contents/Resources
-          ln -s "$GITHUB_WORKSPACE/build/dependencies/Lilu/Lilu/Headers" Lilu.kext/Contents/Resources/Headers
-          ln -s "$GITHUB_WORKSPACE/build/dependencies/Lilu/Lilu/Library" Lilu.kext/Contents/Resources/Library
-      - name: CPU tests
-        run: python3 tools/test.py
-      - name: Build DEBUG
-        run: python3 tools/build.py --output build/DEBUG
-      - name: Build RELEASE
-        run: python3 tools/build.py --release --output build/RELEASE
-      - name: Package
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-        run: |
-          python3 tools/package.py --build build/DEBUG --configuration DEBUG --tag "$RELEASE_TAG"
-          python3 tools/package.py --build build/RELEASE --configuration RELEASE --tag "$RELEASE_TAG"
-          cd build/dist
-          shasum -a 256 *.zip > SHA256SUMS
-      - name: Upload packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: Artifacts
-          path: build/dist/*
-          if-no-files-found: error
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Test-results
-          path: |
-            build/tests/**/test.log
-            build/tests/**/results.json
-          if-no-files-found: ignore
-          retention-days: 14
-
-  release:
-    name: Create draft release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'b00t0x/WhateverXe'
-    needs: build
+  publish-e1:
+    if: github.repository == 'rodrigosalesf/WhateverXe-Enhanced' && github.ref == 'refs/heads/publish-e1'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: '45579212319'
+      BUILD_COMMIT: '639971e956546bc08bc57244ba6eac8915130581'
+      RELEASE_TAG: 'v0.8.5-enhanced-e1'
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@v4
-        with:
-          name: Artifacts
-          path: dist
-      - name: Attach verified build artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+      - name: Verify successful source build
         run: |
-          if gh release view "$RELEASE_TAG" --json isDraft,body \
-              --jq 'select(.isDraft == true) | .body' > release-notes.md && test -s release-notes.md; then
-            : # Preserve release text explicitly supplied with the draft.
-          else
-            python3 tools/release_notes.py "$RELEASE_TAG" > release-notes.md
-          fi
+          set -euo pipefail
+          gh run view "$BUILD_RUN" --json headSha,conclusion,status | jq -e --arg sha "$BUILD_COMMIT" '.headSha == $sha and .status == "completed" and .conclusion == "success"'
+      - name: Download and verify existing packages
+        run: |
+          set -euo pipefail
+          gh run download "$BUILD_RUN" --name Artifacts --dir dist
           cd dist
           sha256sum -c SHA256SUMS
-          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > release-state; then
-            test "$(cat release-state)" = true
-          else
-            gh release create "$RELEASE_TAG" --verify-tag --draft \
-              --title "$RELEASE_TAG" --notes-file ../release-notes.md
-          fi
-          gh release edit "$RELEASE_TAG" --notes-file ../release-notes.md
-          gh release upload "$RELEASE_TAG" ./*.zip SHA256SUMS --clobber
+          test "$(find . -maxdepth 1 -name '*DEBUG*.zip' | wc -l)" -eq 1
+          test "$(find . -maxdepth 1 -name '*RELEASE*.zip' | wc -l)" -eq 1
+      - name: Publish experimental prerelease
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'NOTES'
+          ## WhateverXe Enhanced E1 — experimental
+          Based on upstream WhateverXe 0.8.5; includes more precise sleepable delays, bounded clock/PCODE waits, safer eDP panel-status checks, and regression tests.
+
+          DEBUG and RELEASE were built successfully by GitHub Actions. These are the original packages from run #45579212319, with SHA256SUMS. No real-hardware or macOS Tahoe runtime validation has been completed. Use a separate test EFI and keep a recovery option.
+          
+          Build: https://github.com/rodrigosalesf/WhateverXe-Enhanced/actions/runs/45579212319
+          Source: 639971e956546bc08bc57244ba6eac8915130581
+          NOTES
+          gh release create "$RELEASE_TAG" dist/*.zip dist/SHA256SUMS --target "$BUILD_COMMIT" --title "WhateverXe Enhanced E1 (0.8.5)" --prerelease --notes-file release-notes.md
