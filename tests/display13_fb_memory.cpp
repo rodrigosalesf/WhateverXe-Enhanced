@@ -13,6 +13,7 @@ struct Fixture {
     unsigned reads {};
     bool changePool {},changePlane {},missingRegister {};
     bool deadPower {},changeOwner {};
+    unsigned changeBitmap {};
     uint32_t changeRegister {};
     Fixture() : ptes(0x3000000/4096) {
         put(framebuffer,0x1D0,reinterpret_cast<uintptr_t>(controller));
@@ -32,6 +33,12 @@ struct Fixture {
         assert(r>=0x800000 && !(r&7));const auto page=(r-0x800000)/8;assert(page<ptes.size());++reads;
         if(page==2 && changeOwner)put(controller,0xC0,uintptr_t(0));
         if(page==2 && changePool)put(controller,0x1A30,uint32_t(0x1000000));
+        if(page==2 && changeBitmap==1)put(controller,0xDF0,uint32_t(9));
+        if(page==2 && changeBitmap==2)put(controller,0xDF4,uint8_t(2));
+        if(page==2 && changeBitmap==3)put(controller,0xDF5,uint8_t(2));
+        if(page==2 && changeBitmap==4) {
+            put(controller,0xDF0,uint32_t(3));put(controller,0xDF4,uint8_t(2));
+        }
         if(page==2 && changePlane)registers[0x7019C]=4096;
         if(page==2 && changeRegister)registers[changeRegister]=0;
         if(page==2 && deadPower)registers[0x45404]=UINT32_MAX;
@@ -373,6 +380,22 @@ int main() {
     Fixture scratch;scratch.ptes[17]=scratch.ptes[0];assert(scratch.inspect().status==Status::PTE);
     Fixture local;
     local.ptes[17]|=2;assert(local.inspect().status==Status::PTE);
+    // Exhaustively qualify native slot-zero ownership across the bitmap.
+    // Refuse invalid or foreign bits before reading any GGTT entry.
+    for(unsigned count=0;count<=4;++count)for(unsigned used=0;used<=4;++used)
+    for(unsigned mask=0;mask<16;++mask) {
+        Fixture f;put(f.controller,0xDF5,uint8_t(count));put(f.controller,0xDF4,uint8_t(used));
+        put(f.controller,0xDF0,uint32_t(mask));
+        const bool expected=count>=1 && count<=3 && used<=count &&
+            (mask&1) && mask<(1U<<count) && unsigned(__builtin_popcount(mask))==used;
+        assert(f.inspect().status==(expected?Status::Complete:Status::UnsupportedPool));
+        assert(f.reads==(expected?f.ptes.size():0));
+    }
+    // Even a coherent peer allocation change invalidates this snapshot.
+    for(unsigned drift=1;drift<=4;++drift) {
+        Fixture f;f.changeBitmap=drift;
+        assert(f.inspect().status==Status::StateChanged);
+    }
     Fixture mutablePool;mutablePool.changePool=true;assert(mutablePool.inspect().status==Status::StateChanged);
     Fixture mutablePlane;mutablePlane.changePlane=true;assert(mutablePlane.inspect().status==Status::StateChanged);
     for(auto reg : {0x45404U,0x42084U,0x60400U,0x70008U}) {
