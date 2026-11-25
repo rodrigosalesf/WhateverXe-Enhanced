@@ -23,6 +23,10 @@
 
 void DVMTCalcFix::processKernel(KernelPatcher &patcher, DeviceInfo *info) {
 	applied=false;
+	enabled=false;
+	dvmt=0;
+	if (!info || !info->videoBuiltin)
+		return;
 	// Enable the fix if designated boot argument or device property is found
 	enabled = checkKernelArgument("-igfxdvmt");
 	if (!enabled)
@@ -33,6 +37,7 @@ void DVMTCalcFix::processKernel(KernelPatcher &patcher, DeviceInfo *info) {
 	// Guard: Disable the patch if it is not available on the current Intel platforms
 	if (!available) {
 		SYSLOG("igfx", "DVMT: This fix is not available on the current platform and has been disabled.");
+		enabled = false;
 		return;
 	}
 	
@@ -44,7 +49,13 @@ void DVMTCalcFix::processKernel(KernelPatcher &patcher, DeviceInfo *info) {
 	}
 	
 	// Read the DVMT preallocated memory set in BIOS from the GMCH Graphics Control field at 0x50 (PCI0,2,0)
-	auto gms = WIOKit::readPCIConfigValue(info->videoBuiltin, WIOKit::kIOPCIConfigGraphicsControl, 0, 16) >> 8;
+	const auto ggc = WIOKit::readPCIConfigValue(info->videoBuiltin, WIOKit::kIOPCIConfigGraphicsControl, 0, 16);
+	if (ggc >= 0xFFFFU) {
+		SYSLOG("igfx", "DVMT: Invalid PCI graphics control read; calculation patch disabled.");
+		enabled = false;
+		return;
+	}
+	const auto gms = ggc >> 8;
 	
 	// Disable the fix if the GMS value can be calculated by Apple's formula correctly
 	// Reference: 10th Generation Intel Processor Families: Datasheet, Volume 2, Section 4.1.28
@@ -58,7 +69,8 @@ void DVMTCalcFix::processKernel(KernelPatcher &patcher, DeviceInfo *info) {
 	} else if (gms >= 0xF0 && gms <= 0xFE) {
 		dvmt = ((gms & 0x0F) + 1) * 4;
 	} else {
-		SYSLOG("igfx", "DVMT: GMS value is reserved. Check your BIOS settings. DVMT will be set to 0.");
+		SYSLOG("igfx", "DVMT: GMS value is reserved; calculation patch disabled.");
+		enabled = false;
 		return;
 	}
 	
@@ -71,6 +83,9 @@ void DVMTCalcFix::processKernel(KernelPatcher &patcher, DeviceInfo *info) {
 }
 
 void DVMTCalcFix::processFramebufferKext(KernelPatcher &patcher, size_t index, mach_vm_address_t address, size_t size) {
+	// Never inject a zero or unvalidated memory size into the native driver.
+	if (!enabled || !available || !dvmt)
+		return;
 	// Find the address of `AppleIntelFramebufferController::FBMemMgr_Init()`
 	auto startAddress = patcher.solveSymbol(index, "__ZN31AppleIntelFramebufferController13FBMemMgr_InitEv", address, size);
 	if (!startAddress) {
