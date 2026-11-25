@@ -47,6 +47,20 @@ jobs:
         run: |
           mkdir -p build/diagnostics
           xcrun swiftc -swift-version 5 -target x86_64-apple-macos11.0 tools/metal_probe.swift -o build/diagnostics/metal_probe
+      - name: Verify Metal diagnostic host-only logic
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe=build/diagnostics/metal_probe
+          "$probe" --self-test
+          for n in 0 1001 invalid; do
+            status=0
+            "$probe" --iterations "$n" || status=$?
+            test "$status" -eq 2
+          done
+          status=0
+          "$probe" --iterations 1 --iterations 2 || status=$?
+          test "$status" -eq 2
       - name: Build DEBUG
         run: python3 tools/build.py --output build/DEBUG
       - name: Build RELEASE
