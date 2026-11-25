@@ -386,10 +386,12 @@ template<class IO> Readout inspect(IO &io,const void *controller,size_t controll
         r.status=Status::DisplayState;return r;
     }
     r.pool=pool(controller);const auto &p=r.pool;
-    if (field<uint8_t>(framebuffer,0x4288)!=0 || !field<uint8_t>(controller,0xDF5) ||
-        field<uint8_t>(controller,0xDF5)>3 || !field<uint8_t>(controller,0xDF4) ||
-        field<uint8_t>(controller,0xDF4)>field<uint8_t>(controller,0xDF5) ||
-        !(field<uint32_t>(controller,0xDF0)&1) || p.state!=1 || p.descriptor) {
+    // The entire native allocation bitmap must agree with the occupied count.
+    // A set bit for slot zero alone does not establish consistent ownership.
+    const auto slotCount=field<uint8_t>(controller,0xDF5),usedSlots=field<uint8_t>(controller,0xDF4);
+    const auto slotMask=field<uint32_t>(controller,0xDF0);
+    if (field<uint8_t>(framebuffer,0x4288)!=0 || !bitmapValid(slotCount,usedSlots,slotMask) ||
+        !(slotMask&1) || p.state!=1 || p.descriptor) {
         r.status=Status::UnsupportedPool;return r;
     }
     // Compare native slot metadata and PTEs with the actual PCI memory layout.
@@ -449,7 +451,8 @@ template<class IO> Readout inspect(IO &io,const void *controller,size_t controll
     const auto finalWells=io.read(0x45404);
     if(finalWells==UINT32_MAX || (finalWells&(bootScanout ? 0x403U : 3U))!=(bootScanout ? 0x403U : 3U) || !same(p,pool(controller)) ||
         !associations(controller,controllerBytes,framebuffer,framebufferBytes,expectedOwner) ||
-        field<uint8_t>(framebuffer,0x4288)!=0 || !(field<uint32_t>(controller,0xDF0)&1) ||
+        field<uint8_t>(framebuffer,0x4288)!=0 || field<uint32_t>(controller,0xDF0)!=slotMask ||
+        field<uint8_t>(controller,0xDF4)!=usedSlots || field<uint8_t>(controller,0xDF5)!=slotCount ||
         (bootScanout && (io.read(0x42084)!=dpt || io.read(transReg)!=trans || io.read(confReg)!=conf ||
         io.read(0x7018C)!=position || io.read(0x701A4)!=offset ||
         io.read(0x7019C)!=r.surface || io.read(0x701AC)!=r.surface ||
