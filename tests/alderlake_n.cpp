@@ -200,6 +200,24 @@ int main() {
         if(!failure)assert(a.resources.eus==96 && a.resources.nativeSubslices==12 &&
             a.resources.l3Banks==8 && a.resources.urbKiB==512 && a.releasedMask==3);
     }
+    // Capacity and EDRAM are qualified outputs, not merely raw observations.
+    // Preserve a balanced ProfileMismatch sample for alternate GT decoding.
+    for(unsigned failure=0;failure<5;++failure) {
+        auto io=firmwareGT();io.regs[0x120010]=0;
+        if(failure==1)io.failReleaseGT=true;
+        if(failure==2)io.regs[0x2030]=UINT32_MAX;
+        if(failure==3)io.regs[0x120010]=UINT32_MAX;
+        if(failure==4)io.regs[0x9140]=0xe00ff;
+        uint32_t edram=123;
+        const auto r=AlderLakeN::readGT(io,true,&edram);
+        using S=AlderLakeN::GTStatus;
+        const S expected[]={S::Complete,S::ReleaseFailed,S::Unavailable,S::Unavailable,S::ProfileMismatch};
+        assert(r.status==expected[failure] && r.count==16 && r.fuses[0]==1);
+        if(!failure)assert(r.resources.eus==24 && r.resources.urbKiB==256);
+        else assert(!r.resources.slices && !r.resources.dss && !r.resources.nativeSubslices &&
+                    !r.resources.eus && !r.resources.l3Banks && !r.resources.urbKiB);
+        assert(edram==((!failure || failure==4)?0U:UINT32_MAX));
+    }
     // Output belongs to this sample only, including non-admission and preflight refusal.
     {auto io=firmwareGT();uint32_t edram=0;
      assert(AlderLakeN::readGT(io,false,&edram).status==AlderLakeN::GTStatus::NotAdmitted);
