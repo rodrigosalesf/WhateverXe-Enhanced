@@ -58,6 +58,14 @@ inline Profile select(uint32_t pci,uint32_t revision,bool present,const void *da
     if(!id || id>=0xFFFF)return identify(pci,revision,0);
     return identify(pci,revision,(id<<16)|(pci&0xFFFF));
 }
+// Diagnostic only: preserve the existing selection and provider ABI.
+// A recognized or overridden backend is not hardware qualification.
+inline const char *identityStatus(const Profile &p) {
+    if((p.identity&0xFFFF)!=0x8086 || p.revision>255)return "invalid-pci";
+    if(!p.admitted())return p.overridden() ? "override-rejected" : "unsupported";
+    if(!p.overridden())return "physical-backend";
+    return deviceEntry(p.identity) ? "known-physical-override" : "unknown-physical-override";
+}
 inline bool same(const Profile &a,const Profile &b) {
     return a.identity==b.identity && a.revision==b.revision && a.family==b.family &&
         a.display==b.display && a.gt==b.gt && a.donor==b.donor && a.effectiveIdentity==b.effectiveIdentity;

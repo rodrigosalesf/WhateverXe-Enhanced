@@ -4041,7 +4041,7 @@ void XE::adlnBootstrap(IOPCIDevice *pci) {
 		volatile uint8_t *base;
 		uint64_t length;
 		volatile uint8_t *aperture {};
-		bool readable(uint32_t offset) const { return base && length >= 4 && offset <= length - 4; }
+		bool readable(uint32_t offset) const { return base && XELPMemory::register32(length,offset); }
 		uint32_t read(uint32_t offset) const { return *reinterpret_cast<volatile uint32_t *>(base + offset); }
 		void write(uint32_t offset,uint32_t value) { *reinterpret_cast<volatile uint32_t *>(base + offset)=value; }
 		void delay() { IODelay(100); }
@@ -4058,10 +4058,7 @@ void XE::adlnBootstrap(IOPCIDevice *pci) {
 		void hold(uint32_t milliseconds) { IOSleep(milliseconds); }
 	} io {reinterpret_cast<volatile uint8_t *>(map->getVirtualAddress()), map->getLength()};
 	const bool barReady = io.base && io.length == 0x1000000;
-    const auto reservedHigh=barReady ? io.read(0x1082C4) : UINT32_MAX;
-    const auto reservedLow=barReady ? io.read(0x1082C0) : UINT32_MAX;
-    const auto reserved=barReady && reservedHigh==io.read(0x1082C4) ?
-        (uint64_t(reservedHigh)<<32)|reservedLow : UINT64_MAX;
+    const auto reserved=XELPMemory::readReservation(io,barReady);
     const bool reservationReady=XELPMemory::reservation(xelpMemory,reserved);
     uint64_t reservation[] {1,reservationReady,reserved,xelpMemory.usable()};
     pci->setProperty("N97StolenReservation",reservation,sizeof(reservation));
@@ -4423,6 +4420,12 @@ void XE::processKernel(KernelPatcher &patcher, DeviceInfo *info) {
 	// This must precede tglLoadHDMIWiring, tglPrepareMMIOUC and TGL FIA reads.
 	auto physicalGPU = OSDynamicCast(IOPCIDevice, info->videoBuiltin);
 	selectProfile(XELP::deviceProfile(physicalGPU));
+    if(physicalGPU) {
+        physicalGPU->setProperty("WEXEnhancedIdentity",XELP::identityStatus(xeProfile));
+        physicalGPU->setProperty("WEXEnhancedPhysicalPCI",xeProfile.identity,32);
+        physicalGPU->setProperty("WEXEnhancedEffectivePCI",xeProfile.effectiveIdentity,32);
+        physicalGPU->setProperty("WEXEnhancedRevision",xeProfile.revision,32);
+    }
     // ADLP_LOAD_ONLY_KERNEL: do not enter TGL MMIO/FIA, bootstrap or VM setup.
     const auto physicalEntry=XELP::deviceEntry(xeProfile.identity);
     adlpLoadOnly=physicalEntry && xeProfile.mobileDisplay13() &&
@@ -4443,7 +4446,7 @@ void XE::processKernel(KernelPatcher &patcher, DeviceInfo *info) {
         if(map && map->getVirtualAddress() && map->getLength()==0x1000000) {
             struct IO {
                 volatile uint8_t *base;
-                bool readable(uint32_t o) const {return o<=0xFFFFFC;}
+                bool readable(uint32_t o) const {return base && XELPMemory::register32(0x1000000,o);}
                 uint32_t read(uint32_t o) {return *reinterpret_cast<volatile uint32_t *>(base+o);}
                 void write(uint32_t o,uint32_t v) {*reinterpret_cast<volatile uint32_t *>(base+o)=v;}
                 void delay() {IODelay(100);}
@@ -4487,7 +4490,7 @@ void XE::processKernel(KernelPatcher &patcher, DeviceInfo *info) {
         if(map && map->getVirtualAddress() && map->getLength()==0x1000000) {
             struct IO {
                 volatile uint8_t *base;
-                bool readable(uint32_t o) const {return o<=0xFFFFFC;}
+                bool readable(uint32_t o) const {return base && XELPMemory::register32(0x1000000,o);}
                 uint32_t read(uint32_t o) {return *reinterpret_cast<volatile uint32_t *>(base+o);}
                 void write(uint32_t o,uint32_t v) {*reinterpret_cast<volatile uint32_t *>(base+o)=v;}
                 void delay() {IODelay(100);}

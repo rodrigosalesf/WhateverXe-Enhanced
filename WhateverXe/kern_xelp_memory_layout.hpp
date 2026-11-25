@@ -14,6 +14,19 @@ inline bool mmioPages(uint64_t pci,uint64_t physical,uint64_t length,uint64_t co
     first=static_cast<uint32_t>(pci>>12);end=static_cast<uint32_t>((pci+length)>>12);
     return first<end;
 }
+// A 32-bit MMIO access must fit completely inside the mapped window.
+inline bool register32(uint64_t length,uint32_t offset) {
+    return !(offset&3U) && length>=4 && uint64_t(offset)<=length-4;
+}
+// The DSM reservation is a split 64-bit register. Do not accept an
+// inaccessible half or a high word that changed during the read.
+template<class IO> uint64_t readReservation(IO &io,bool admitted) {
+    constexpr uint32_t low=0x1082C0,high=0x1082C4;
+    if(!admitted || !io.readable(low) || !io.readable(high))return UINT64_MAX;
+    const auto hi=io.read(high),lo=io.read(low),again=io.read(high);
+    if(hi==UINT32_MAX || lo==UINT32_MAX || hi!=again)return UINT64_MAX;
+    return (uint64_t(hi)<<32)|lo;
+}
 constexpr uint64_t DMAEnd=0x8000000000ULL, Aperture=0x10000000;
 struct Layout {
     uint64_t base {},bytes {},gttBytes {},apertureBytes {};
@@ -47,7 +60,11 @@ inline Layout decode(uint16_t ggc,uint32_t low,uint32_t high,uint64_t aperture=A
 // i915_gem_stolen.c reads GEN6_STOLEN_RESERVED as a 64-bit register, then
 // bounds the allocator by its physical base. Never infer it from GTT size.
 inline bool reservation(Layout &r,uint64_t reg) {
-    if(!r.valid || reg==UINT64_MAX)return false;
+    // A failed refresh must revoke a previously qualified reservation.
+    // Keep only the conservative diagnostic bound from PCI GGMS.
+    r.reservationKnown=false;r.reservationRegister=0;
+    r.allocationEnd=r.valid ? r.bytes-r.gttBytes : 0;
+    if(!r.valid || reg==UINT64_MAX || uint32_t(reg)==UINT32_MAX)return false;
     const auto base=reg&0xFFFFFFFFFFF00000ULL;
     const uint64_t size=0x100000ULL<<((reg>>7)&3),top=r.base+r.bytes;
     if(!base || base<r.base || base>top || (base<top && size>top-base))return false;

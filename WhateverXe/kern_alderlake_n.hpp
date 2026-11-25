@@ -59,6 +59,8 @@ static_assert(sizeof(GTReadout)==60*4,"AlderLakeN GT readout layout");
 template<class IO> GTReadout readGT(IO &io, bool admitted, uint32_t *edram=nullptr,
     bool (*decode)(const uint32_t *,Resources &)=nullptr) {
     GTReadout out;
+    // Never leave a previous successful EDRAM sample visible on early exit.
+    if(edram)*edram=UINT32_MAX;
     if(!admitted)return out;
     constexpr uint32_t request[] {0xA188,0xA278},ack[] {0x130044,0xD84};
     constexpr uint32_t fuse[] {0x9138,0x913C,0x9134,0x9118,0x9140};
@@ -68,6 +70,7 @@ template<class IO> GTReadout readGT(IO &io, bool admitted, uint32_t *edram=nullp
     for(unsigned d=0;d<2;++d)if(!io.readable(request[d]) || !io.readable(ack[d]))return out;
     for(auto reg:fuse)if(!io.readable(reg))return out;
     for(auto reg:engine)if(!io.readable(reg))return out;
+    if(edram && !io.readable(0x120010))return out;
     for(unsigned d=0;d<2;++d) {
         out.requestBefore[d]=io.read(request[d]);out.ackBefore[d]=io.read(ack[d]);
         if(out.requestBefore[d]==UINT32_MAX || out.ackBefore[d]==UINT32_MAX)return out;
