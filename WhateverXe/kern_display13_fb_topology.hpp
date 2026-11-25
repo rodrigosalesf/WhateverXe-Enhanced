@@ -89,15 +89,21 @@ inline bool bound(const void *platform,const void *config,uint32_t ddi) {
         static_cast<const uint8_t *>(config)==static_cast<const uint8_t *>(platform)+0x20+24*ddi;
 }
 inline bool selected(const void *platform,const void *config,const Display13OutputWiring &w) {
-    if(!selectedWiring(w))return false;
-    for(unsigned d=0;d<Ports;++d)if((w.selected()&(1U<<d)) && bound(platform,config,d) &&
-        w.matches(static_cast<const uint32_t *>(config)))return true;
+    if(!platform || !config || !selectedWiring(w))return false;
+    for(unsigned d=0;d<Ports;++d)if((w.selected()&(1U<<d)) && bound(platform,config,d)) {
+        // A valid record for a different active DDI is not valid in this slot.
+        // Copy bytes to aligned storage before decoding the native record.
+        uint32_t record[6];
+        memcpy(record,config,sizeof(record));
+        return record[0]==d && w.matches(record);
+    }
     return false;
 }
 // Transport adapter validates records under the native FB mutex. The binding
 // core below consumes only validated port identities, independent of transport.
 inline XELP::NativePorts boundPorts(const void *platform,const Display13OutputWiring &w) {
     if(!platform || !selectedWiring(w))return {};
+    if(static_cast<const uint8_t *>(platform)[0x12]!=Ports)return {};
     for(unsigned d=0;d<Ports;++d)if((w.selected()&(1U<<d)) &&
         !selected(platform,static_cast<const uint8_t *>(platform)+0x20+24*d,w))return {};
     return {platform,w.selected()};
@@ -112,7 +118,8 @@ inline uint32_t excludedHotplug(const void *platform,uint32_t bytes,const Displa
     if(p[0x12]!=Ports)return 0;
     for(unsigned d=0;d<Ports;++d)if((w.selected()&(1U<<d)) && !selected(platform,p+0x20+24*d,w))return 0;
     for(unsigned d=0;d<Ports;++d) {
-        const auto config=reinterpret_cast<const uint32_t *>(p+0x20+24*d);
+        uint32_t config[6];
+        memcpy(config,p+0x20+24*d,sizeof(config));
         if(config[0]!=d || (!(w.selected()&(1U<<d)) && (config[4]!=1 || config[5])))return 0;
     }
     return (0x3F000000 & ~((w.hotplug()>>3)<<24)) |
