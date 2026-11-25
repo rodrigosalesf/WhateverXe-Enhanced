@@ -141,12 +141,14 @@ template<class IO> void write(IO &io,Change &r,uint32_t reg,uint32_t v) {
 }
 template<class IO> void delay(IO &io,Change &r,unsigned us) {io.delayUs(us);r.delayUs+=us;}
 template<class IO> bool wait(IO &io,Change &r,uint32_t reg,uint32_t mask,uint32_t expected,unsigned timeoutUs) {
-    for(unsigned elapsed=0;;elapsed+=10) {
+    for(unsigned elapsed=0;;) {
         uint32_t v;
         if(!value(io,reg,v)) {r.status=ChangeStatus::Unavailable;return false;}
         if((v&mask)==expected)return true;
         if(elapsed>=timeoutUs)return false;
-        delay(io,r,10);
+        const auto remaining=timeoutUs-elapsed;
+        const auto step=remaining<10 ? remaining : 10U;
+        delay(io,r,step);elapsed+=step;
     }
 }
 template<class IO> bool mailbox(IO &io,Change &r,uint32_t data,unsigned budgetUs=1000) {
@@ -157,8 +159,10 @@ template<class IO> bool mailbox(IO &io,Change &r,uint32_t data,unsigned budgetUs
         if(r.status!=ChangeStatus::Unavailable)r.status=ChangeStatus::MailboxBusy;
         return false;
     }
+    const auto spent=r.delayUs-start;
+    if(spent && spent>=budgetUs) {r.status=ChangeStatus::MailboxTimeout;return false;}
     write(io,r,Data,data);write(io,r,Data1,0);write(io,r,Mailbox,0x80000007);
-    const auto remaining=budgetUs-(r.delayUs-start);
+    const auto remaining=budgetUs-spent;
     if(!wait(io,r,Mailbox,1U<<31,0,remaining<500 ? remaining:500)) {
         if(r.status!=ChangeStatus::Unavailable)r.status=ChangeStatus::MailboxTimeout;
         return false;
@@ -195,7 +199,8 @@ template<class IO> Change set(IO &io,uint64_t nativeHz,Conditions conditions,Var
         if(!mailbox(io,r,3,remaining))return r;
         if(r.mailboxReply&1)break;
         if(r.delayUs-start>=53000) {r.status=ChangeStatus::PrepareTimeout;return r;}
-        delay(io,r,10);
+        const auto retryBudget=53000-(r.delayUs-start);
+        delay(io,r,retryBudget<10 ? retryBudget : 10U);
     }
     const auto prepared=read(io,variant);
     if(prepared.status!=r.before.status || prepared.dssm!=r.before.dssm || prepared.pll!=r.before.pll ||
@@ -254,7 +259,8 @@ template<class IO> Change stop(IO &io,Conditions conditions,Variant variant=Vari
         if(!mailbox(io,r,3,remaining))return r;
         if(r.mailboxReply&1)break;
         if(r.delayUs-start>=53000) {r.status=ChangeStatus::PrepareTimeout;return r;}
-        delay(io,r,10);
+        const auto retryBudget=53000-(r.delayUs-start);
+        delay(io,r,retryBudget<10 ? retryBudget : 10U);
     }
     const auto prepared=read(io,variant);
     if(prepared.status!=r.before.status || prepared.dssm!=r.before.dssm || prepared.pll!=r.before.pll ||

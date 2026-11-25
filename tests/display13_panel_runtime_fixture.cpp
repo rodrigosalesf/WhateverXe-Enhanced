@@ -176,6 +176,15 @@ int main(int argc,char **argv) {
    assert(sink[0x722]==(wide?level>>8:level) && (!wide || sink[0x723]==uint8_t(level)));
   }
   const auto noCalls=auxCalls;assert(XE::display13PanelBrightness(f.ctl,65536)==kIOReturnNotReady && auxCalls==noCalls);
+  // The production AUX entry must refuse an off or inaccessible PPS status,
+  // without writing the sink and without leaking its temporary references.
+  for(uint32_t status:{0U,UINT32_MAX}) {
+   f.map.at(0xC7200)=status;const auto callsBefore=auxCalls;const auto sinkBefore=sink;
+   assert(XE::display13PanelBrightness(f.ctl,123)==kIOReturnNotReady);
+   assert(auxCalls==callsBefore && sink==sinkBefore && !portRefs);f.balanced();
+  }
+  f.map.at(0xC7200)=0x80000000;
+
   auxOwner=false;const auto before=auxCalls;assert(XE::display13PanelBrightness(f.ctl,100)==kIOReturnNotReady && auxCalls==before);
   auxOwner=true;sink[0x702]=0;assert(XE::display13PanelBrightness(f.ctl,100)==kIOReturnNotReady);
   assert(f.map.at(0xC8250)==~0U && f.map.at(0xC8254)==~0U && f.map.at(0xC8258)==~0U);

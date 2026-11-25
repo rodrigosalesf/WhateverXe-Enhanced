@@ -1,4 +1,5 @@
 #include "kern_display13_color.hpp"
+#include "kern_sleepable_delay.hpp"
 #include <mach/clock.h>
 #include <IOKit/IOMessage.h>
 #include <IOKit/IOTimerEventSource.h>
@@ -5212,7 +5213,7 @@ struct Display13FBClockIO {
 			r!=Display13Clock::Data && r!=Display13Clock::Data1)return;
 		*reinterpret_cast<volatile uint32_t *>(map->getVirtualAddress()+r)=v;
 	}
-	void delayUs(unsigned us) {if(us>=1000)IOSleep(us/1000);else IODelay(us);}
+	void delayUs(unsigned us) { XELP::sleepableDelayUs(us, [](unsigned n) { IOSleep(n); }, [](unsigned n) { IODelay(n); }); }
 };
 // Owner IOLock is held; never retain the IRQ simple lock across a mailbox
 // wait. Mask the master, block new native handlers, then let a prior handler
@@ -9921,7 +9922,7 @@ void XE::wrapAlderLakeNDisableDisplay(IOService *controller,IOService *fb,OSObje
 				bool readable(uint32_t r) {return map && map->getVirtualAddress() && map->getLength()==0x1000000 && r<map->getLength();}
 				uint32_t read(uint32_t r) {return *reinterpret_cast<volatile uint32_t *>(map->getVirtualAddress()+r);}
 				void write(uint32_t r,uint32_t v) {if(r==0x70080+bank || r==0x70088+bank || r==0x70084+bank)*reinterpret_cast<volatile uint32_t *>(map->getVirtualAddress()+r)=v;}
-				void delayUs(unsigned us) {IOSleep(us/1000);}
+				void delayUs(unsigned us) { XELP::sleepableDelayUs(us, [](unsigned n) { IOSleep(n); }, [](unsigned n) { IODelay(n); }); }
 			} io {c.map,pipe*0x1000};
 			result=Display13Cursor::stop(io,pipe,c.transcoders);
 			if(result.status==Display13Cursor::Status::Complete) {
@@ -10077,7 +10078,7 @@ Display13WM::Latch XE::adlnVerifyWMLatch(IOService *fb,uint64_t nativeHz,uint64_
 		uint32_t read(uint32_t reg) const {return *reinterpret_cast<volatile uint32_t *>(map->getVirtualAddress()+reg);}
 		uint64_t nativeClockHz() {Display13FBClockIO clockIO {map};return Display13Clock::read(clockIO,display13ClockVariant()).nativeHz();}
 		uint64_t nowUs() {uint64_t t=0,ns=0;clock_get_uptime(&t);absolutetime_to_nanoseconds(t,&ns);return ns/1000;}
-		void delayUs(unsigned us) {IOSleep(us/1000);}
+		void delayUs(unsigned us) { XELP::sleepableDelayUs(us, [](unsigned n) { IOSleep(n); }, [](unsigned n) { IODelay(n); }); }
 	} io {c.map};
 	auto adjust=reinterpret_cast<uint64_t (*)(void *,void *,void *,bool,void *)>(callbackXE->adlnAdjustPixelClock);
 	const auto pipePixel=adjust(c.controller,fb,path,true,nullptr);
@@ -14206,7 +14207,9 @@ bool XE::display13PanelAUX(void *controller,uint32_t brightness,unsigned action)
   port->retain();pg=display13PanelPowerReference(true);
   if(pg)aux=c.bridge.getAUX(io,ddi).status==Display13Power::Status::Complete;
  }
- const bool powered=io.read(0xC7200)!=UINT32_MAX && (io.read(0xC7200)&0x80000000U);
+ // A single read avoids treating an inaccessible second read as panel-on.
+ const auto panelStatus=aux ? io.read(0xC7200) : UINT32_MAX;
+ const bool powered=panelStatus!=UINT32_MAX && (panelStatus&0x80000000U);
  IOLockUnlock(c.lock);
  struct AUX {
   void *port;
