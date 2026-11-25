@@ -10,15 +10,21 @@ namespace EDPAuxBacklight {
 struct Caps {bool set {},enable {},wide {};uint32_t maximum {};};
 enum class Action {Level,Enable,Disable};
 template<class IO> bool probe(IO &io,Caps &c) {
- uint8_t caps[3] {};if(!io.read(0x700,caps,3) || !(caps[1]&1))return false;
- c.set=caps[2]&2;c.enable=caps[1]&4;c.wide=caps[2]&4;
+ c={};
+ uint8_t caps[3] {};if(!io.read(0x700,caps,3) || !(caps[1]&1) ||
+    (caps[0]==0xff && caps[1]==0xff && caps[2]==0xff))return false;
+ Caps candidate;
+ candidate.set=caps[2]&2;candidate.enable=caps[1]&4;candidate.wide=caps[2]&4;
  // AUX enable and AUX level are independent. PWM-only level requires the
  // caller's physical PWM backend; no automatic success for a missing wire.
- if(!c.set && !(caps[2]&1))return false;
- if(!c.set)return true;
- uint8_t bits=0;if(!io.read(0x724,&bits,1))return false;bits&=31;
- if(!bits || bits>16 || (!c.wide && bits>8))return false;
- c.maximum=(1U<<bits)-1;return true;
+ if(!candidate.set && !(caps[2]&1))return false;
+ if(candidate.set) {
+  uint8_t bits=0;if(!io.read(0x724,&bits,1))return false;bits&=31;
+  if(!bits || bits>16 || (!candidate.wide && bits>8))return false;
+  candidate.maximum=(1U<<bits)-1;
+ }
+ // Publish capability fields together, only after all required AUX reads.
+ c=candidate;return true;
 }
 template<class IO> bool enable(IO &io,bool value) {
  uint8_t v=0;if(!io.read(0x720,&v,1))return false;
@@ -27,7 +33,10 @@ template<class IO> bool enable(IO &io,bool value) {
  uint8_t after=0;return io.read(0x720,&after,1) && after==v;
 }
 template<class IO> bool apply(IO &io,const Caps &c,Action action,uint32_t brightness) {
- if(brightness>65535)return false;
+ if(brightness>65535 || (action!=Action::Level && action!=Action::Enable && action!=Action::Disable))return false;
+ if(c.set && (!c.maximum || c.maximum>(c.wide?65535U:255U) ||
+    (c.maximum&(c.maximum+1U))))return false;
+ if(!c.set && c.maximum)return false;
  if(action==Action::Disable)return !c.enable || enable(io,false);
  uint8_t mode=0;if(!io.read(0x721,&mode,1))return false;
  // Preserve panel-specific frequency and unrelated controls. Replace the
