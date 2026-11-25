@@ -43,6 +43,10 @@ jobs:
           ln -s "$GITHUB_WORKSPACE/build/dependencies/Lilu/Lilu/Library" Lilu.kext/Contents/Resources/Library
       - name: CPU tests
         run: python3 tools/test.py
+      - name: Compile Metal diagnostics (no GPU execution on CI)
+        run: |
+          mkdir -p build/diagnostics
+          xcrun swiftc -swift-version 5 -target x86_64-apple-macos11.0 tools/metal_probe.swift -o build/diagnostics/metal_probe
       - name: Build DEBUG
         run: python3 tools/build.py --output build/DEBUG
       - name: Build RELEASE
