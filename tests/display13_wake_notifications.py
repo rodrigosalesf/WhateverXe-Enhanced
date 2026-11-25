@@ -18,7 +18,8 @@ code = r'''
 struct IOService {
  alignas(8) uint8_t bytes[0x4B90]{}; unsigned refs=1;
  IOService *getMetaClass(){return this;}
- unsigned getClassSize(){return sizeof(bytes);}
+ unsigned reportedSize=sizeof(bytes);
+ unsigned getClassSize(){return reportedSize;}
  void retain(){++refs;} void release(){assert(refs>1);--refs;}
 };
 using IOLock=int; unsigned held=0;
@@ -62,6 +63,10 @@ int main(){
   put(fb[0],0x4284,2U);put(fb[1],0x4284,0U);put(fb[2],0x4284,1U);
   if(nativeFirst){event(&fb[1],4,reinterpret_cast<void*>(1));event(&fb[1],8,nullptr);put(fb[1],0x4284,2U);}
  };
+ // Reject undersized callers before interpreting donor-private fields.
+ reset(false);fb[0].reportedSize=0x1d0;
+ assert(!xe.finishDisplay13SystemWake(&fb[0]) && !wakes[0] && !held && !xe.displayWakeEventBusy);
+ fb[0].reportedSize=sizeof(fb[0].bytes);
  // Same topology, either callback order: each client receives one wake.
  // FB2 is parked in Doze; native Doze -> Wake emits no DidWake.
  for(bool nativeFirst:{false,true}){
