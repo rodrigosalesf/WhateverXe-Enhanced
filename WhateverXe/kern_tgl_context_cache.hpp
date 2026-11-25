@@ -18,7 +18,12 @@ inline bool install(void *image,size_t size,uint64_t gpu) {
  const uint32_t pointer=static_cast<uint32_t>(gpu)+BatchOffset+1;
  if(w[0]!=0x21C0 || w[1]!=(gpu|5) || w[2]!=0x21C4 || w[4]!=0x21C8 ||
     (w[3] && w[3]!=pointer) || (w[5] && w[5]!=RestoreOffset))return false;
- memcpy(p+0x1054,&pointer,4);memcpy(p+0x105C,&RestoreOffset,4);return true;
+ // Repeated context qualification is a read-only operation once installed.
+ // Preserve the donor's accepted partial states and write only missing fields.
+ // The caller remains responsible for context lifetime and serialization.
+ if(!w[3])memcpy(p+0x1054,&pointer,4);
+ if(!w[5])memcpy(p+0x105C,&RestoreOffset,4);
+ return true;
 }
 }
 #endif
