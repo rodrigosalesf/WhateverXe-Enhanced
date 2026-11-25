@@ -1,117 +1,80 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-    tags: ['*']
-  pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  actions: read
+  contents: write
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  group: publish-enhanced-e3
+  cancel-in-progress: false
 
 jobs:
-  build:
-    name: Test and build
-    runs-on: macos-15-intel
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: acidanthera/MacKernelSDK
-          ref: 05094e5e88cec7caedbfb35e8449ed0db94bf95b
-          path: MacKernelSDK
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: acidanthera/Lilu
-          ref: 1.7.2
-          path: build/dependencies/Lilu
-          persist-credentials: false
-      - name: Prepare Lilu development files
-        shell: bash
-        run: |
-          mkdir -p Lilu.kext/Contents/Resources
-          ln -s "$GITHUB_WORKSPACE/build/dependencies/Lilu/Lilu/Headers" Lilu.kext/Contents/Resources/Headers
-          ln -s "$GITHUB_WORKSPACE/build/dependencies/Lilu/Lilu/Library" Lilu.kext/Contents/Resources/Library
-      - name: CPU tests
-        run: python3 tools/test.py
-      - name: Compile Metal diagnostics (no GPU execution on CI)
-        run: |
-          mkdir -p build/diagnostics
-          xcrun swiftc -swift-version 5 -target x86_64-apple-macos11.0 tools/metal_probe.swift -o build/diagnostics/metal_probe
-      - name: Build DEBUG
-        run: python3 tools/build.py --output build/DEBUG
-      - name: Build RELEASE
-        run: python3 tools/build.py --release --output build/RELEASE
-      - name: Package
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-        run: |
-          python3 tools/package.py --build build/DEBUG --configuration DEBUG --tag "$RELEASE_TAG"
-          python3 tools/package.py --build build/RELEASE --configuration RELEASE --tag "$RELEASE_TAG"
-          cd build/dist
-          shasum -a 256 *.zip > SHA256SUMS
-      - name: Upload packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: Artifacts
-          path: build/dist/*
-          if-no-files-found: error
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Test-results
-          path: |
-            build/tests/**/test.log
-            build/tests/**/results.json
-          if-no-files-found: ignore
-          retention-days: 14
-
-  release:
-    name: Create draft release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'b00t0x/WhateverXe'
-    needs: build
+  publish-e3:
+    if: github.repository == 'rodrigosalesf/WhateverXe-Enhanced' && github.ref == 'refs/heads/publish-e3'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_COMMIT: '619b440c318b2577c357ceebb0e0f6b9dfeebe74'
+      RELEASE_TAG: 'v0.8.5-enhanced-e3'
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@v4
-        with:
-          name: Artifacts
-          path: dist
-      - name: Attach verified build artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+      - name: Find and verify approved CI 14
+        shell: bash
         run: |
-          if gh release view "$RELEASE_TAG" --json isDraft,body \
-              --jq 'select(.isDraft == true) | .body' > release-notes.md && test -s release-notes.md; then
-            : # Preserve release text explicitly supplied with the draft.
-          else
-            python3 tools/release_notes.py "$RELEASE_TAG" > release-notes.md
-          fi
+          set -euo pipefail
+          run_id="$(gh run list --workflow ci.yml --branch enhanced-e3 --commit "$BUILD_COMMIT" --limit 30 --json databaseId,number,headSha,headBranch,status,conclusion,event --jq '[.[] | select(.number == 14 and .status == "completed" and .conclusion == "success" and .event == "workflow_dispatch")] | if length == 1 then .[0].databaseId else empty end')"
+          test -n "$run_id"
+          gh run view "$run_id" --json headSha,headBranch,status,conclusion,number,event | jq -e --arg sha "$BUILD_COMMIT" '.headSha == $sha and .headBranch == "enhanced-e3" and .status == "completed" and .conclusion == "success" and .number == 14 and .event == "workflow_dispatch"'
+          echo "BUILD_RUN=$run_id" >> "$GITHUB_ENV"
+      - name: Download and verify packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$BUILD_RUN" --name Artifacts --dir dist
           cd dist
+          test -f WhateverXe-0.8.5-DEBUG.zip
+          test -f WhateverXe-0.8.5-RELEASE.zip
+          test -f SHA256SUMS
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 3
           sha256sum -c SHA256SUMS
-          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > release-state; then
-            test "$(cat release-state)" = true
-          else
-            gh release create "$RELEASE_TAG" --verify-tag --draft \
-              --title "$RELEASE_TAG" --notes-file ../release-notes.md
+          grep -Eq '^[[:xdigit:]]{64} [ *]WhateverXe-0\.8\.5-DEBUG\.zip$' SHA256SUMS
+          grep -Eq '^[[:xdigit:]]{64} [ *]WhateverXe-0\.8\.5-RELEASE\.zip$' SHA256SUMS
+      - name: Publish experimental prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'NOTES'
+          ## WhateverXe Enhanced E3 — Display Intelligence (0.8.5)
+          
+          Experimental prerelease based on upstream WhateverXe 0.8.5, with the E1/E2 changes carried forward.
+          
+          ### Enhanced changelog
+          - E3.1: fail closed on invalid or reserved DVMT reads, reset stale memory state, and guard missing devices.
+          - E3.2: validate physical DDI record identity, native port count and aligned record decoding.
+          - E3.3: reject unsupported DP lane counts, invalid status responses and stale receiver qualification.
+          - E3.4: validate VESA AUX capability probes and brightness ranges; preserve the existing PWM algorithm.
+          - E3.5: qualify wake caller size and reject inaccessible IRQ master readback during repeated enable.
+          - E3.6: add a standalone Metal compute probe with per-device registry ID, shader compilation, bounded command completion and output verification. The probe is available in source (tools/metal_probe.swift), not inside the kext packages.
+          
+          ### Validation
+          CI #9 through #14 reported success. The publisher reuses the verified DEBUG and RELEASE ZIPs from CI #14 on the exact E3 source commit and verifies their SHA256 checksums. CI compiles the Metal probe but does not execute GPU workloads. Optional native binary checks requiring external inputs are not claimed to have run.
+          
+          No new physical hardware qualification, performance gain, complete Metal support or sleep/wake guarantee is claimed. Use the matching WhateverXe Graphics stack and Lilu, keep a recovery EFI, and do not load WhateverGreen alongside WhateverXe.
+          
+          Source: 619b440c318b2577c357ceebb0e0f6b9dfeebe74
+          NOTES
+          printf '\nBuild: https://github.com/%s/actions/runs/%s\n' "$GH_REPO" "$BUILD_RUN" >> release-notes.md
+          # Refuse to publish over an existing tag or release.
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists; refusing overwrite" >&2
+            exit 1
           fi
-          gh release edit "$RELEASE_TAG" --notes-file ../release-notes.md
-          gh release upload "$RELEASE_TAG" ./*.zip SHA256SUMS --clobber
+          if gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag already exists; refusing overwrite" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" dist/WhateverXe-0.8.5-DEBUG.zip dist/WhateverXe-0.8.5-RELEASE.zip dist/SHA256SUMS --target "$BUILD_COMMIT" --title "WhateverXe Enhanced E3 (0.8.5)" --prerelease --notes-file release-notes.md
