@@ -10,9 +10,13 @@ namespace TGLResetPoll {
 // and the recovery context; this helper neither resumes nor retires any job.
 template<class IO> bool wait(IO &io,uint32_t mask) {
     const auto start=io.now();
-    for(unsigned n=0;n<201;++n) {
+    // A missing domain cannot certify a reset. All-ones MMIO is an
+    // inaccessible read, not a scratch request or a completed engine.
+    for(unsigned n=0;mask && n<201;++n) {
         const auto status=io.read(0x941c);
+        if(status==UINT32_MAX)break;
         const auto scratch=io.read(0xcec4);
+        if(scratch==UINT32_MAX)break;
         if(scratch&1) {
             io.write(0x4100,0xf0f0b1b1);
             io.write(0x4104,0xf0f0b2b2);
