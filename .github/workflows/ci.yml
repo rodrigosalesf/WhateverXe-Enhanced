@@ -22,7 +22,41 @@ jobs:
       BUILD_COMMIT: 'c24d6d8bc8e3b98977eab4e146c8d26463a0d338'
       RELEASE_TAG: 'v0.8.5-enhanced-e4'
     steps:
+      - name: Check release state and retrieve exact installation guide
+        id: release-state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p guide
+          gh api -H 'Accept: application/vnd.github.raw+json' "repos/$GH_REPO/contents/INSTALL-E4-PT-BR.md?ref=$GITHUB_SHA" > guide/INSTALL-E4-PT-BR.md
+          test "$(git hash-object guide/INSTALL-E4-PT-BR.md)" = '55fae786951bb9db4bde66939a3a242d2bb99302'
+          if gh release view "$RELEASE_TAG" --json tagName,isDraft,isPrerelease > release-state.json 2>/dev/null; then
+            jq -e --arg tag "$RELEASE_TAG" '.tagName == $tag and .isDraft == false and .isPrerelease == true' release-state.json
+            test "$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)" = "$BUILD_COMMIT"
+            echo "existing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "existing=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Add installation guide to existing verified E4 prerelease
+        if: steps.release-state.outputs.existing == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" --json body --jq .body > existing-notes.md
+          if ! grep -Fq '<!-- enhanced-e4-install-pt-br -->' existing-notes.md; then
+            printf '\n\n---\n\n<!-- enhanced-e4-install-pt-br -->\n\n' >> existing-notes.md
+            cat guide/INSTALL-E4-PT-BR.md >> existing-notes.md
+          fi
+          if gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | grep -Fxq 'INSTALL-E4-PT-BR.md'; then
+            mkdir -p existing-guide
+            gh release download "$RELEASE_TAG" --pattern INSTALL-E4-PT-BR.md --dir existing-guide
+            cmp guide/INSTALL-E4-PT-BR.md existing-guide/INSTALL-E4-PT-BR.md
+          else
+            gh release upload "$RELEASE_TAG" guide/INSTALL-E4-PT-BR.md
+          fi
+          gh release edit "$RELEASE_TAG" --notes-file existing-notes.md
       - name: Find and verify approved CI 21
+        if: steps.release-state.outputs.existing == 'false'
         shell: bash
         run: |
           set -euo pipefail
@@ -31,6 +65,7 @@ jobs:
           gh run view "$run_id" --json headSha,headBranch,status,conclusion,number,event | jq -e --arg sha "$BUILD_COMMIT" '.headSha == $sha and .headBranch == "enhanced-e4" and .status == "completed" and .conclusion == "success" and .number == 21 and .event == "workflow_dispatch"'
           echo "BUILD_RUN=$run_id" >> "$GITHUB_ENV"
       - name: Download and verify packages
+        if: steps.release-state.outputs.existing == 'false'
         shell: bash
         run: |
           set -euo pipefail
@@ -44,15 +79,18 @@ jobs:
           grep -Eq '^[[:xdigit:]]{64} [ *]WhateverXe-0\.8\.5-DEBUG\.zip$' SHA256SUMS
           grep -Eq '^[[:xdigit:]]{64} [ *]WhateverXe-0\.8\.5-RELEASE\.zip$' SHA256SUMS
       - name: Attach exact Metal diagnostic source
+        if: steps.release-state.outputs.existing == 'false'
         shell: bash
         run: |
           set -euo pipefail
           gh api -H 'Accept: application/vnd.github.raw+json' "repos/$GH_REPO/contents/tools/metal_probe.swift?ref=$BUILD_COMMIT" > dist/metal_probe.swift
           test "$(git hash-object dist/metal_probe.swift)" = '2639dc9e2b2b464217ebc9649ef5d6e864f0da4c'
           cd dist
-          sha256sum metal_probe.swift >> SHA256SUMS
+          cp ../guide/INSTALL-E4-PT-BR.md .
+          sha256sum metal_probe.swift INSTALL-E4-PT-BR.md >> SHA256SUMS
           sha256sum -c SHA256SUMS
       - name: Publish experimental prerelease
+        if: steps.release-state.outputs.existing == 'false'
         shell: bash
         run: |
           set -euo pipefail
@@ -88,6 +126,8 @@ jobs:
           Source: c24d6d8bc8e3b98977eab4e146c8d26463a0d338
           NOTES
           printf '\nBuild: https://github.com/%s/actions/runs/%s\n' "$GH_REPO" "$BUILD_RUN" >> release-notes.md
+          printf '\n\n---\n\n<!-- enhanced-e4-install-pt-br -->\n\n' >> release-notes.md
+          cat guide/INSTALL-E4-PT-BR.md >> release-notes.md
           # Refuse to publish over an existing tag or release.
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             echo "Release already exists; refusing overwrite" >&2
@@ -97,4 +137,4 @@ jobs:
             echo "Tag already exists; refusing overwrite" >&2
             exit 1
           fi
-          gh release create "$RELEASE_TAG" dist/WhateverXe-0.8.5-DEBUG.zip dist/WhateverXe-0.8.5-RELEASE.zip dist/SHA256SUMS dist/metal_probe.swift --target "$BUILD_COMMIT" --title "WhateverXe Enhanced E4 (0.8.5)" --prerelease --notes-file release-notes.md
+          gh release create "$RELEASE_TAG" dist/WhateverXe-0.8.5-DEBUG.zip dist/WhateverXe-0.8.5-RELEASE.zip dist/SHA256SUMS dist/metal_probe.swift dist/INSTALL-E4-PT-BR.md --target "$BUILD_COMMIT" --title "WhateverXe Enhanced E4 (0.8.5)" --prerelease --notes-file release-notes.md
