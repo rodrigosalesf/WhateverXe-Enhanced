@@ -2,6 +2,7 @@
 #include <cstring>
 #include <cassert>
 #include <cstdio>
+#include <initializer_list>
 #include "kern_display13_handoff.hpp"
 
 using namespace Display13Handoff;
