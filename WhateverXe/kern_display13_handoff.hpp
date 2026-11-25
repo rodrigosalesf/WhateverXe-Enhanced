@@ -67,9 +67,15 @@ struct Receiver {
     bool enhanced {}, alternateReset {};
 };
 template<class Read> bool receiver(Read read,unsigned lanes,bool panel,Receiver &sink) {
+    // Only DP lane counts defined by the current SST backend are valid.
+    // Reject before indexing the two lane-status bytes or issuing AUX reads.
+    // A failed re-probe must not expose a previous receiver's qualification.
+    sink={};
+    if(lanes!=1 && lanes!=2 && lanes!=4)return false;
     uint8_t config[3] {},status[3] {},compression=0;
     if(!read(0x100,config,sizeof(config)) || !read(0x202,status,sizeof(status)) ||
-       (config[1]&31)!=lanes || (config[2]&0x2f) || !(status[2]&1))return false;
+       (config[1]&31)!=lanes || (config[2]&0x2f) || !(status[2]&1) ||
+       (status[0]==0xff && status[1]==0xff && status[2]==0xff))return false;
     for(unsigned i=0;i<lanes;++i)
         if(((status[i/2]>>(4*(i%2)))&7)!=7)return false;
     // DSC_ENABLE is optional. Only query the enable register if supported.
