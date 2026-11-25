@@ -4041,7 +4041,7 @@ void XE::adlnBootstrap(IOPCIDevice *pci) {
 		volatile uint8_t *base;
 		uint64_t length;
 		volatile uint8_t *aperture {};
-		bool readable(uint32_t offset) const { return base && length >= 4 && offset <= length - 4; }
+		bool readable(uint32_t offset) const { return base && XELPMemory::register32(length,offset); }
 		uint32_t read(uint32_t offset) const { return *reinterpret_cast<volatile uint32_t *>(base + offset); }
 		void write(uint32_t offset,uint32_t value) { *reinterpret_cast<volatile uint32_t *>(base + offset)=value; }
 		void delay() { IODelay(100); }
@@ -4058,10 +4058,7 @@ void XE::adlnBootstrap(IOPCIDevice *pci) {
 		void hold(uint32_t milliseconds) { IOSleep(milliseconds); }
 	} io {reinterpret_cast<volatile uint8_t *>(map->getVirtualAddress()), map->getLength()};
 	const bool barReady = io.base && io.length == 0x1000000;
-    const auto reservedHigh=barReady ? io.read(0x1082C4) : UINT32_MAX;
-    const auto reservedLow=barReady ? io.read(0x1082C0) : UINT32_MAX;
-    const auto reserved=barReady && reservedHigh==io.read(0x1082C4) ?
-        (uint64_t(reservedHigh)<<32)|reservedLow : UINT64_MAX;
+    const auto reserved=XELPMemory::readReservation(io,barReady);
     const bool reservationReady=XELPMemory::reservation(xelpMemory,reserved);
     uint64_t reservation[] {1,reservationReady,reserved,xelpMemory.usable()};
     pci->setProperty("N97StolenReservation",reservation,sizeof(reservation));
@@ -4272,6 +4269,8 @@ void XE::adlnBootstrap(IOPCIDevice *pci) {
                 XELP::primaryMobileVideoEngine(gt.fuses[4]) == XELP::VideoEngine::VCS2;
             pci->setProperty("N97NativeEDRAM",edram,32);
 		}
+        pci->setProperty("WEXEnhancedGTReadoutStatus",AlderLakeN::gtStatusName(gt.status));
+        if(adlpRenderRequested)pci->setProperty("WEXEnhancedMobileTopologyStatus",AlderLakeN::mobileTopologyDiagnostic(gt));
 		pci->setProperty("N97GTReadout",&gt,sizeof(gt));
 		pci->setProperty("N97GTTopologyReady",gt.status==AlderLakeN::GTStatus::Complete);
 		SYSLOG("igfx", "AlderLakeN GT status=%u requested=%x released=%x failed=%x EU=%u banks=%u; engines unchanged",
@@ -4423,6 +4422,12 @@ void XE::processKernel(KernelPatcher &patcher, DeviceInfo *info) {
 	// This must precede tglLoadHDMIWiring, tglPrepareMMIOUC and TGL FIA reads.
 	auto physicalGPU = OSDynamicCast(IOPCIDevice, info->videoBuiltin);
 	selectProfile(XELP::deviceProfile(physicalGPU));
+    if(physicalGPU) {
+        physicalGPU->setProperty("WEXEnhancedIdentity",XELP::identityStatus(xeProfile));
+        physicalGPU->setProperty("WEXEnhancedPhysicalPCI",xeProfile.identity,32);
+        physicalGPU->setProperty("WEXEnhancedEffectivePCI",xeProfile.effectiveIdentity,32);
+        physicalGPU->setProperty("WEXEnhancedRevision",xeProfile.revision,32);
+    }
     // ADLP_LOAD_ONLY_KERNEL: do not enter TGL MMIO/FIA, bootstrap or VM setup.
     const auto physicalEntry=XELP::deviceEntry(xeProfile.identity);
     adlpLoadOnly=physicalEntry && xeProfile.mobileDisplay13() &&
@@ -4443,13 +4448,15 @@ void XE::processKernel(KernelPatcher &patcher, DeviceInfo *info) {
         if(map && map->getVirtualAddress() && map->getLength()==0x1000000) {
             struct IO {
                 volatile uint8_t *base;
-                bool readable(uint32_t o) const {return o<=0xFFFFFC;}
+                bool readable(uint32_t o) const {return base && XELPMemory::register32(0x1000000,o);}
                 uint32_t read(uint32_t o) {return *reinterpret_cast<volatile uint32_t *>(base+o);}
                 void write(uint32_t o,uint32_t v) {*reinterpret_cast<volatile uint32_t *>(base+o)=v;}
                 void delay() {IODelay(100);}
             } io {reinterpret_cast<volatile uint8_t *>(map->getVirtualAddress())};
             uint32_t edram=UINT32_MAX;
             auto gt=AlderLakeN::readGT(io,true,&edram,XELP::decodeMobileGT);
+            physicalGPU->setProperty("WEXEnhancedGTReadoutStatus",AlderLakeN::gtStatusName(gt.status));
+            physicalGPU->setProperty("WEXEnhancedMobileTopologyStatus",AlderLakeN::mobileTopologyDiagnostic(gt));
             physicalGPU->setProperty("ADLPGTBoot",&gt,sizeof(gt));
             physicalGPU->setProperty("ADLPEDRAM",edram,32);
             uint32_t registers[][2] {
@@ -4487,7 +4494,7 @@ void XE::processKernel(KernelPatcher &patcher, DeviceInfo *info) {
         if(map && map->getVirtualAddress() && map->getLength()==0x1000000) {
             struct IO {
                 volatile uint8_t *base;
-                bool readable(uint32_t o) const {return o<=0xFFFFFC;}
+                bool readable(uint32_t o) const {return base && XELPMemory::register32(0x1000000,o);}
                 uint32_t read(uint32_t o) {return *reinterpret_cast<volatile uint32_t *>(base+o);}
                 void write(uint32_t o,uint32_t v) {*reinterpret_cast<volatile uint32_t *>(base+o)=v;}
                 void delay() {IODelay(100);}
@@ -4505,6 +4512,8 @@ void XE::processKernel(KernelPatcher &patcher, DeviceInfo *info) {
                 physicalGPU->setProperty("TGLGT2Qualified",tglGT2Ready);
                 physicalGPU->setProperty("TGLGT2Boot",&gt,sizeof(gt));
             }
+            physicalGPU->setProperty("WEXEnhancedGTReadoutStatus",AlderLakeN::gtStatusName(gt.status));
+            if(tglGT2Detected)physicalGPU->setProperty("WEXEnhancedMobileTopologyStatus",AlderLakeN::mobileTopologyDiagnostic(gt));
             if(display12SmallGTDetected)physicalGPU->setProperty(adlsDisplaySelected?"ADLSGTQualified":"XELPSmallGTQualified",display12SmallGTReady);
             if(display12SmallGTDetected)physicalGPU->setProperty(adlsDisplaySelected?"ADLSGTBoot":"XELPSmallGTBoot",&gt,sizeof(gt));
             if(display12SmallGTDetected)physicalGPU->setProperty(adlsDisplaySelected?"ADLSEDRAM":"XELPSmallGTEDRAM",edram,32);
@@ -12924,10 +12933,16 @@ bool XE::processFramebufferKext(KernelPatcher &patcher,size_t index,mach_vm_addr
  const uint8_t entry[]={0x55,0x48,0x89,0xe5,0x41,0x57,0x41,0x56,0x41,0x55,0x41,0x54,0x53,0x48,0x83,0xec,0x38,0x49,0x89,0xf6,0x49,0x89,0xfd};
  const auto start=patcher.solveSymbol<mach_vm_address_t>(index,symbol,address,size);patcher.clearError();
  if(size<=0x3F1FC+sizeof(entry) || start!=address+0x3F1FC ||
-    memcmp(reinterpret_cast<void *>(start),entry,sizeof(entry)))return false;
+    memcmp(reinterpret_cast<void *>(start),entry,sizeof(entry))) {
+  IORegistryEntry::getRegistryRoot()->setProperty("WEXEnhancedFramebufferGate","entry-mismatch");
+  return false;
+ }
  KernelPatcher::RouteRequest gate(symbol,wrapFramebufferStart,orgFramebufferStart);
  const bool routed=patcher.routeMultiple(index,&gate,1,address,size);patcher.clearError();
- if(!routed)return false;
+ if(!routed) {
+  IORegistryEntry::getRegistryRoot()->setProperty("WEXEnhancedFramebufferGate","route-failed");
+  return false;
+ }
  if(display13FramebufferRequested)
   processDisplay13Shutdown(patcher,index,address,size);
 
@@ -12937,6 +12952,8 @@ bool XE::processFramebufferKext(KernelPatcher &patcher,size_t index,mach_vm_addr
  framebufferBackendInstalled=display13FramebufferRequested ?
   processDisplay13Framebuffer(patcher,index,address,size) : processKextFull(patcher,index,address,size);
  uint32_t record[]={1,routed,framebufferDonorCommonReady,framebufferBackendInstalled};
+ IORegistryEntry::getRegistryRoot()->setProperty("WEXEnhancedFramebufferGate",
+  !framebufferDonorCommonReady ? "common-failed" : !framebufferBackendInstalled ? "backend-failed" : "hooks-installed");
  IORegistryEntry::getRegistryRoot()->setProperty("WEXFramebufferInstallation",record,sizeof(record));
  return true;
 }

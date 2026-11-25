@@ -44,5 +44,13 @@ int main() {
  assert(p.displayAdmitted() && p.admitted() && p.mobileDisplay13());
  c={};c.profile=p;c.comboBackend=3;c.legacy=8;c.legacyBackend=0x78;assert(c.valid());
  c.abi=2;assert(!c.valid());c.abi=3;c.profile.gt=GT::TGLGT2;assert(!c.valid());
+ // Diagnostics distinguish explicit experimental overrides without changing admission.
+ assert(!strcmp(identityStatus(identify(0x46a38086,1)),"physical-backend"));
+ assert(!strcmp(identityStatus(identify(0x46a38086,1,0x9a498086)),"known-physical-override"));
+ assert(!strcmp(identityStatus(identify(0x12348086,1,0x46d28086)),"unknown-physical-override"));
+ assert(!strcmp(identityStatus(identify(0x46a38086,1,0x46d28086)),"override-rejected"));
+ assert(!strcmp(identityStatus(identify(0x4c8a8086,1)),"unsupported"));
+ assert(!strcmp(identityStatus(identify(0x46a310de,1)),"invalid-pci"));
+ assert(!strcmp(identityStatus(identify(0x46a38086,256)),"invalid-pci"));
  puts("PASS device table, physical/effective identity, strict override bytes/vendor/revision, model choice and ABI3");
 }

@@ -26,6 +26,30 @@ status cannot authorize AUX brightness writes and releases temporary refs.
 Its actual donor binary replay is separately optional. These checks preserve
 hardware, donor and native ownership admission and are not qualification.
 
+## Enhanced E2 regression checks
+
+`device_selection` checks diagnostic categories independently of admission: a
+physical backend, a known or unknown explicit override, rejected overrides,
+unsupported identities and invalid PCI inputs. The selection policy and ABI3
+layouts remain unchanged; this is not hardware qualification.
+`xelp_memory_layout` checks complete aligned MMIO windows and a modeled DSM
+high/low/high read, including inaccessible words, changed high words and no
+register access after failed admission. A failed reservation refresh must revoke
+allocator/recycle admission rather than retain a stale certificate; valid
+reservation and pool cases remain covered. `alderlake_n` checks that an optional
+EDRAM output is invalidated on early refusal and that an unmapped requested
+EDRAM register prevents forcewake acquisition. Callers not requesting EDRAM
+retain the existing path. Hardware MMIO, IOKit property publication and actual
+GPU execution remain unverified.
+
+The E2 follow-up extends `adlp_resources` and `alderlake_n` with explicit
+mobile fuse rejection reasons and ownership-failure diagnostics. The decoder
+retains its existing capacity admission and the GT readout layout is unchanged.
+`framebuffer_common` checks the new diagnostic property on entry mismatch,
+route failure, common/backend failure and hook installation, independently of
+native startup success. These are CPU fixtures; neither successful sampling nor
+hook installation demonstrates working acceleration or hardware qualification.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched

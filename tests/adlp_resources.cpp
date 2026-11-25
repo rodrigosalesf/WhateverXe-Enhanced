@@ -18,6 +18,24 @@ int main() {
                r.nativeSubslices==8 && r.l3Banks==6 && r.urbKiB==384);
     }
     ResourceCases::check(decodeMobileGT);
+    // Each reason is an independent change to an accepted 48-EU capacity.
+    using S=MobileGTStatus;
+    const uint32_t accepted[]={1,7,0,0xc0,0xe00fe};
+    const struct {unsigned word;uint32_t value;S status;const char *label;} rejected[]={
+        {0,UINT32_MAX,S::Unavailable,"fuses-unavailable"},
+        {0,2,S::SliceMismatch,"slice-mismatch"}, {1,0,S::NoDSS,"no-dss"},
+        {4,0xe00ff,S::MediaMismatch,"media-mismatch"},
+        {2,0x01,S::EUMismatch,"eu-mismatch"}, {3,0x80,S::L3Mismatch,"l3-mismatch"}
+    };
+    for(const auto &bad:rejected) {
+        uint32_t sample[5];memcpy(sample,accepted,sizeof(sample));
+        assert(inspectMobileGT(sample,r)==S::Complete && r.eus==48);
+        sample[bad.word]=bad.value;
+        assert(inspectMobileGT(sample,r)==bad.status && !r.eus && !r.l3Banks);
+        assert(!strcmp(mobileGTStatusName(bad.status),bad.label));
+        assert(!decodeMobileGT(sample,r) && !r.eus);
+    }
+    assert(!strcmp(mobileGTStatusName(S::Complete),"capacity-decoded"));
     assert(!decodeMobileGT(nullptr,r));
     for(unsigned i=0;i<5;++i){auto save=f[i];f[i]=~0U;assert(!decodeMobileGT(f,r));f[i]=save;}
     for(unsigned bad:{0U,2U,3U}){f[0]=bad;assert(!decodeMobileGT(f,r));}f[0]=1;

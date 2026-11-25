@@ -2,8 +2,46 @@
 #include <cassert>
 #include <cstdio>
 #include <initializer_list>
+#include <vector>
 using namespace XELPMemory;
+struct ReservationIO {
+ uint32_t hi=1,lo=0x95f00000,again=1,blocked=0;
+ std::vector<uint32_t> reads;
+ bool readable(uint32_t offset) const {return offset!=blocked;}
+ uint32_t read(uint32_t offset) {
+  reads.push_back(offset);
+  assert(offset==0x1082C0 || offset==0x1082C4);
+  return offset==0x1082C0 ? lo : reads.size()==1 ? hi : again;
+ }
+};
 int main() {
+ // 32-bit windows: exact end, subword windows, unaligned addresses and wrap boundary.
+ for(uint64_t length=0;length<=32;++length)for(uint32_t offset=0;offset<=36;++offset) {
+  const bool expected=offset%4==0 && uint64_t(offset)+4<=length;
+  assert(register32(length,offset)==expected);
+ }
+ assert(register32(0x1000000,0xfffffc) && !register32(0x1000000,0xfffffd));
+ assert(!register32(0x1000000,UINT32_MAX) && register32(UINT64_MAX,0xfffffffc));
+ for(unsigned failure=0;failure<7;++failure) {
+  ReservationIO io;
+  if(failure==1)io.blocked=0x1082C0;
+  if(failure==2)io.blocked=0x1082C4;
+  if(failure==3)io.hi=io.again=UINT32_MAX;
+  if(failure==4)io.lo=UINT32_MAX;
+  if(failure==5)io.again=2;
+  const auto raw=readReservation(io,failure!=6);
+  assert(raw==(failure ? UINT64_MAX : 0x195f00000ULL));
+  if(failure==1 || failure==2 || failure==6)assert(io.reads.empty());
+  else assert((io.reads==std::vector<uint32_t>{0x1082C4,0x1082C0,0x1082C4}));
+ }
+ // After a valid sample, a failed refresh must revoke allocator admission.
+ {auto m=decode(0x02C1,0x92000000,1);const auto raw=m.base+m.bytes-0x100000;
+  for(auto bad:{uint64_t(0),uint64_t(UINT64_MAX),uint64_t(0x1FFFFFFFFULL)}) {
+   assert(reservation(m,raw) && displayPool(m,0x4000000));
+   assert(!reservation(m,bad) && !m.reservationKnown && !m.reservationRegister);
+   assert(m.usable()==m.bytes-m.gttBytes && !displayPool(m,0x4000000));
+   uint32_t recycle=4096;assert(!boundRecycle(m,m.base,recycle));
+  }}
  uint32_t first,end;
  for(auto base:{0x4010000000ULL,0x80000000ULL,0x6000000000ULL}) {
   assert(mmioPages(base,base,0x1000000,0x1000000,first,end));

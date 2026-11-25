@@ -3,6 +3,7 @@
 #include <map>
 #include <vector>
 #include <cstdio>
+#include <cstring>
 #include "kern_alderlake_n.hpp"
 #include "kern_alderlake_n_gpu.hpp"
 struct IO {
@@ -36,7 +37,10 @@ struct LinearIO : IO {
 };
 struct GTIO : IO {
     std::vector<AlderLakeN::Register> writes;
-    bool failGT=false,failReleaseGT=false;
+    bool failGT=false,failReleaseGT=false,missingEDRAM=false;
+    bool readable(uint32_t offset) const {
+        return !(missingEDRAM && offset==0x120010) && IO::readable(offset);
+    }
     uint32_t read(uint32_t offset) {
         if(offset!=0xA188 && offset!=0xA278 && offset!=0x130044 && offset!=0xD84)
             assert((regs[0x130044]&1) && (regs[0xD84]&1));
@@ -187,9 +191,24 @@ int main() {
         using S=AlderLakeN::GTStatus;
         const S expected[]={S::Complete,S::AckTimeout,S::ReleaseFailed,S::Unavailable,S::ProfileMismatch};
         assert(a.status==expected[failure]);
+        const char *labels[]={"capacity-decoded","forcewake-timeout","forcewake-release-failed","readout-unavailable","media-mismatch"};
+        assert(!strcmp(AlderLakeN::mobileTopologyDiagnostic(a),labels[failure]));
+        if(!failure) {
+            auto incomplete=a;incomplete.releasedMask=1;
+            assert(!strcmp(AlderLakeN::mobileTopologyDiagnostic(incomplete),"ownership-incomplete"));
+        }
         if(!failure)assert(a.resources.eus==96 && a.resources.nativeSubslices==12 &&
             a.resources.l3Banks==8 && a.resources.urbKiB==512 && a.releasedMask==3);
     }
+    // Output belongs to this sample only, including non-admission and preflight refusal.
+    {auto io=firmwareGT();uint32_t edram=0;
+     assert(AlderLakeN::readGT(io,false,&edram).status==AlderLakeN::GTStatus::NotAdmitted);
+     assert(edram==UINT32_MAX && io.reads.empty() && io.writes.empty());
+     io.missingEDRAM=true;edram=0;
+     assert(AlderLakeN::readGT(io,true,&edram).status==AlderLakeN::GTStatus::Unavailable);
+     assert(edram==UINT32_MAX && io.reads.empty() && io.writes.empty());
+     // Optional EDRAM is not needed by the caller that did not request it.
+     assert(AlderLakeN::readGT(io,true).status==AlderLakeN::GTStatus::Complete);}
     auto excludedGT=firmwareGT();assert(AlderLakeN::readGT(excludedGT,false).status==AlderLakeN::GTStatus::NotAdmitted && excludedGT.reads.empty());
     auto busyGT=firmwareGT();busyGT.regs[0xA188]=1;
     assert(AlderLakeN::readGT(busyGT,true).status==AlderLakeN::GTStatus::ExistingOwner && busyGT.writes.empty());

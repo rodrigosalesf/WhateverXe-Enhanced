@@ -24,6 +24,8 @@ struct IOService {void setProperty(const char*,bool) {}};
 struct IORegistryEntry {
  static IORegistryEntry *getRegistryRoot(){static IORegistryEntry r;return &r;}
  template<class...T>void setProperty(T...){}
+ std::string gate;
+ void setProperty(const char *key,const char *value){if(!strcmp(key,"WEXEnhancedFramebufferGate"))gate=value;}
 };
 bool surfaceOK=true,nvramOK=true,tglSonomaSurfaceFramebufferReady=false;
 uintptr_t offset(const char *s){
@@ -88,6 +90,10 @@ int main(int argc,char **argv){
   if(argc>1)assert(!memcmp(image.data()+span.first,span.second.data(),span.second.size()));
   else memcpy(image.data()+span.first,span.second.data(),span.second.size());
  }
+ // A mismatched entry must report its failure without installing hooks.
+ {auto b=image;b[0x3f1fc]^=1;XE x;KernelPatcher p;
+  assert(!x.processFramebufferKext(p,1,(uintptr_t)b.data(),b.size()) && !p.attempts);
+  assert(IORegistryEntry::getRegistryRoot()->gate=="entry-mismatch");}
  for(bool display13:{false,true})for(unsigned failure=0;failure<16;++failure){
   shutdownCalls=0;
   auto b=image;uintptr_t pure=0x1234;memcpy(b.data()+0xccad0+0x188,&pure,sizeof(pure));
@@ -101,6 +107,10 @@ int main(int argc,char **argv){
   bool handled=x.processFramebufferKext(p,1,(uintptr_t)b.data(),b.size());
   assert(shutdownCalls==(display13 && failure!=1?1U:0U));
   assert(handled==(failure!=1));
+  const char *expectedGate=failure==1?"route-failed":
+    (failure>=2 && failure<=8)||failure==10||failure==14||failure==15?"common-failed":
+    failure==9?"backend-failed":"hooks-installed";
+  assert(IORegistryEntry::getRegistryRoot()->gate==expectedGate);
   IOService c;
   if(failure==13){XELPComboClock::ClockSnapshot clocks;clocks.layout=XELPComboClock::Layout::Display13;
    clocks.mux[0]=0xC01;clocks.enable[1]=0xCC000000;

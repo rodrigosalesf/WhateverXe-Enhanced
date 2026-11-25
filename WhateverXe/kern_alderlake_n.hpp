@@ -42,6 +42,18 @@ struct Register { uint32_t offset {}, value {}; };
 enum class GTStatus : uint32_t {
     NotAdmitted, ExistingOwner, AckTimeout, Unavailable, ProfileMismatch, ReleaseFailed, Complete
 };
+inline const char *gtStatusName(GTStatus status) {
+    switch(status) {
+        case GTStatus::NotAdmitted:return "not-admitted";
+        case GTStatus::ExistingOwner:return "existing-owner";
+        case GTStatus::AckTimeout:return "forcewake-timeout";
+        case GTStatus::Unavailable:return "readout-unavailable";
+        case GTStatus::ProfileMismatch:return "profile-mismatch";
+        case GTStatus::ReleaseFailed:return "forcewake-release-failed";
+        case GTStatus::Complete:return "readout-complete";
+    }
+    return "unknown";
+}
 struct GTReadout {
     uint32_t version {1};
     GTStatus status {GTStatus::NotAdmitted};
@@ -53,12 +65,21 @@ struct GTReadout {
     Register registers[16] {};
 };
 static_assert(sizeof(GTReadout)==60*4,"AlderLakeN GT readout layout");
+// Never present capacity from a failed or incomplete ownership transaction.
+inline const char *mobileTopologyDiagnostic(const GTReadout &gt) {
+    if(gt.status!=GTStatus::Complete && gt.status!=GTStatus::ProfileMismatch)return gtStatusName(gt.status);
+    if(gt.requestedMask!=3 || gt.releasedMask!=3 || gt.releaseFailedMask)return "ownership-incomplete";
+    Resources decoded;
+    return XELP::mobileGTStatusName(XELP::inspectMobileGT(gt.fuses,decoded));
+}
 
 // Linux v6.12 gen12 forcewake domains: fuses and BCS are GT, RCS is render.
 // Only acquire an unowned kernel bit0. Never reset domains or alter engines.
 template<class IO> GTReadout readGT(IO &io, bool admitted, uint32_t *edram=nullptr,
     bool (*decode)(const uint32_t *,Resources &)=nullptr) {
     GTReadout out;
+    // Never leave a previous successful EDRAM sample visible on early exit.
+    if(edram)*edram=UINT32_MAX;
     if(!admitted)return out;
     constexpr uint32_t request[] {0xA188,0xA278},ack[] {0x130044,0xD84};
     constexpr uint32_t fuse[] {0x9138,0x913C,0x9134,0x9118,0x9140};
@@ -68,6 +89,7 @@ template<class IO> GTReadout readGT(IO &io, bool admitted, uint32_t *edram=nullp
     for(unsigned d=0;d<2;++d)if(!io.readable(request[d]) || !io.readable(ack[d]))return out;
     for(auto reg:fuse)if(!io.readable(reg))return out;
     for(auto reg:engine)if(!io.readable(reg))return out;
+    if(edram && !io.readable(0x120010))return out;
     for(unsigned d=0;d<2;++d) {
         out.requestBefore[d]=io.read(request[d]);out.ackBefore[d]=io.read(ack[d]);
         if(out.requestBefore[d]==UINT32_MAX || out.ackBefore[d]==UINT32_MAX)return out;
