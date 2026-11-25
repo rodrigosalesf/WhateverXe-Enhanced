@@ -64,7 +64,8 @@ Twenty runs of 1,000 iterations per workload completed successfully. The probe v
 | HEVC encoding | 🟡 Driver advertises capabilities; real encode test pending |
 | OpenCL | 🟡 Platform available; GPU workload pending |
 | VP9 / AV1 hardware decoding | ❌ Not advertised on this setup |
-| OpenGL, brightness, HDMI, sleep/wake | ⏳ Pending hardware tests |
+| HDMI audio | 🔴 Open issue: picture without sound reported; reproduction and fix pending |
+| OpenGL, brightness, HDMI display validation, sleep/wake | ⏳ Pending hardware tests |
 
 Median GPU command-buffer times across the 20 runs were approximately **0.004 ms (compute)** and **0.034–0.039 ms (render, including blit)**. These are small correctness/latency micro-workloads, not FPS, peak GPU throughput or sustained gaming benchmarks.
 
@@ -83,6 +84,7 @@ Select the target GPU with `--registry-id` when multiple devices are present. A 
 
 ## Known limits and next steps
 
+- **E5 highest priority — HDMI audio:** HDMI video without sound has been reported. E4 has no dedicated verified HDMI-audio fix. The affected configuration and root cause still need to be established; the report is not evidence that every HDMI configuration is affected.
 - GPU utilization and active-frequency counters remained zero in sampled diagnostics despite evidence of graphical activity. Root cause and behavior under synchronized sustained load are still unverified.
 - A texture-byte counter intermittently returned a near-uint64-limit value; investigate counter integrity without assuming memory corruption.
 - RC6, DC6, RPS, ForceWake behavior under load, physical reset/recovery, sleep/wake, display brightness and HDMI need targeted hardware tests.
@@ -98,10 +100,16 @@ Select the target GPU with `--registry-id` when multiple devices are present. A 
 | E2 | Hardware intelligence | Implemented |
 | E3 | Display and diagnostics | Implemented |
 | E4 | Graphics stability and Metal validation | Implemented; initial real-hardware validation |
-| E5 | Advanced power management: telemetry, counter integrity, RPS, ForceWake, RC6 and display power | Planned |
+| E5 | **HDMI Audio & Advanced Power Management:** prioritize HDMI audio detection and playback; retain telemetry, counter integrity, RPS, ForceWake, RC6 and display power work | Planned — HDMI audio is the highest priority |
 | E6 | Hardware video validation and potential improvements | Planned |
 | E7 | macOS compatibility validation | Planned |
 | E8 | Hardware-specific improvements | Planned |
+
+### E5 priority: HDMI audio compatibility
+
+Investigate the HDMI video-without-audio report before changing kernel behavior. Establish the PCI/HDA controller and codec identity, the framebuffer connector and audio routing, EDID audio capabilities and ELD availability where exposed, and AppleHDA/AppleALC integration on the affected setup. Compare upstream and Enhanced with equivalent configuration. Changes should be limited to the component responsible for the failure; WhateverXe alone may not resolve an ACPI, codec, or audio-driver issue.
+
+Acceptance criteria on the affected hardware: an HDMI audio output is detected and selectable in macOS, actual stereo playback reaches the HDMI display/receiver while video remains stable, reconnect and sleep/wake behavior are tested, and internal audio and existing Metal/display functionality do not regress. Record results and limitations separately. No HDMI-audio fix or hardware qualification is claimed yet.
 
 ### Community testing
 
