@@ -126,6 +126,21 @@ python3 tools/test.py
 
 Output is under `build/`. AppleIntelTGLCompat is built here and distributed through Graphics. Optional exact-donor tests accept `--donor` and `--accelerator` paths.
 
+### Enhanced E3: Metal diagnostics
+
+The optional user-space probe distinguishes Metal device enumeration from a completed GPU compute workload with verified output. It does not change the kernel, OpenCore configuration or system files.
+
+On the target Mac or Hackintosh, with Xcode command-line tools installed:
+
+```sh
+xcrun swiftc -swift-version 5 tools/metal_probe.swift -o metal_probe
+./metal_probe
+```
+
+Each device is identified by its Metal registry ID. On a multi-GPU system, identify the target Intel iGPU in IORegistry before attributing a PASS to it. To test only that device, run `./metal_probe --registry-id 0xYOUR_ID` (replace the placeholder with the actual hexadecimal ID). The probe reports command queue, shader compilation, pipeline, completion and output failures, and exits nonzero if a selected device fails. Command-buffer completion is bounded to 15 seconds; driver compilation calls themselves are not time-limited.
+
+A PASS is evidence of basic Metal compute on that device, not proof of complete Metal graphics, hardware media codecs, display stability or sleep/wake. The CI compiles the utility but does not execute GPU workloads. The Enhanced E3 changes and this utility require target hardware validation; the upstream compatibility table is not a new Enhanced hardware qualification.
+
 ## License and credits
 
 WhateverXe retains WhateverGreen's copyright notices and BSD-3-Clause license.
