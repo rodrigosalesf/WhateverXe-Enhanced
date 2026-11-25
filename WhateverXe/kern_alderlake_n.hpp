@@ -141,6 +141,13 @@ template<class IO> GTReadout readGT(IO &io, bool admitted, uint32_t *edram=nullp
         else out.releaseFailedMask|=1U<<d;
     }
     if(out.releaseFailedMask)out.status=GTStatus::ReleaseFailed;
+    // Keep raw fuse/engine observations for diagnosis, but never expose a
+    // decoded capacity as qualified after a failed transaction.
+    if(out.status!=GTStatus::Complete)out.resources={};
+    // ProfileMismatch is a balanced raw sample used by the alternate
+    // small-GT decoder. Other failures revoke the optional EDRAM sample.
+    if(edram && out.status!=GTStatus::Complete &&
+       out.status!=GTStatus::ProfileMismatch)*edram=UINT32_MAX;
     return out;
 }
 enum class ReadoutStatus : uint32_t { NotAdmitted, Complete, Unavailable, PowerChanged };
