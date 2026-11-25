@@ -56,6 +56,7 @@ void *IOMalloc(size_t bytes){++allocations;return allocationFailure?nullptr:mall
 void IOFree(void *p,size_t){assert(p);++frees;free(p);}
 struct DiagnosticGPU {
  unsigned command=2,maps=0,snapshots=0;bool allocationFailed=false;
+ std::map<std::string,std::string> diagnostics;
  unsigned configRead16(unsigned r){assert(r==4);return command;}
  struct Map {
   std::vector<uint32_t> bar;unsigned releases=0;
@@ -67,6 +68,10 @@ struct DiagnosticGPU {
   if(!strcmp(key,"ADLPScanoutBoot")){assert(bytes==sizeof(AlderLakeN::DisplayReadout));++snapshots;}
  }
  void setProperty(const char*,uint32_t,unsigned){}
+ void setProperty(const char *key,const char *value){
+  assert(!strcmp(key,"WEXEnhancedGTReadoutStatus") || !strcmp(key,"WEXEnhancedMobileTopologyStatus"));
+  assert(value && diagnostics.emplace(key,value).second);
+ }
  void setProperty(const char *key,bool value){assert(!strcmp(key,"ADLPReadoutAllocationFailed"));allocationFailed=value;}
 };
 struct XE {
@@ -92,7 +97,8 @@ int main(){
   XE xe;DiagnosticGPU gpu;gpu.command=powered?2:0;xe.physicalGPU=&gpu;readout=enabled;
   xe.xeProfile=XELP::identify((physical<<16)|0x8086,12);xe.diagnose();
   const bool blocked=enabled && physical!=0x4c8a;
-  assert(xe.adlpLoadOnly==blocked && xe.initialized==!blocked && gpu.maps==unsigned(blocked&&powered));++cases;
+  assert(xe.adlpLoadOnly==blocked && xe.initialized==!blocked && gpu.maps==unsigned(blocked&&powered));
+  assert(gpu.diagnostics.empty());++cases;
  }
  // A readable diagnostic BAR exercises snapshot allocation success/failure.
  // Either outcome remains load-only, and neither leaks its map or buffer.
@@ -102,7 +108,13 @@ int main(){
   xe.xeProfile=XELP::identify(0x46a68086,12);xe.diagnose();
   assert(xe.adlpLoadOnly && !xe.initialized && gpu.map.releases==1);
   assert(allocations==1 && frees==unsigned(!fail) && gpu.snapshots==unsigned(!fail));
-  assert(gpu.allocationFailed==fail);++cases;
+  assert(gpu.allocationFailed==fail);
+  // A firmware-owned ForceWake domain prevents sampling, independently of
+  // display snapshot allocation. Neither status may claim decoded capacity.
+  assert(gpu.diagnostics.size()==2);
+  assert(gpu.diagnostics.at("WEXEnhancedGTReadoutStatus")=="existing-owner");
+  assert(gpu.diagnostics.at("WEXEnhancedMobileTopologyStatus")=="existing-owner");
+  ++cases;
  }
  readout=false;allocationFailure=false;
  for(unsigned index:{1U,2U})for(unsigned bad=0;bad<4;++bad){
