@@ -113,6 +113,24 @@ Epochs begin at zero and advance on accepted lifecycle events. No raw ELD
 or arbitrary input text is included in reports. Input is limited to 1 MiB,
 1024 events and 4096 ELD bytes per sample.
 
+### E5.4 accelerator telemetry snapshot
+
+Run `python3 tools/test.py --only gpu_telemetry_probe --require gpu_telemetry_probe`.
+The host-only test exercises the actual snapshot parser and offline CLI with
+synthetic XML/binary IORegistry plists, including observed Intel counter names.
+It distinguishes missing, observed zero, invalid unsigned/percentage values,
+all-ones and suspicious high-bit texture byte values. A high-bit observation
+does not prove signed underflow. GART used/size comparisons are reported only
+within the same record and are not proof of memory corruption or physical VRAM.
+Fixtures cover bounds, multiple accelerators, privacy, malformed input and
+bounded offline files. No counter is rewritten or synthesized.
+
+`python3 tools/gpu_telemetry_probe.py --snapshot snapshot.plist` parses offline
+fixtures. Without that argument it performs a read-only IOAccelerator registry
+query on macOS. The tool does not measure frequency or activity independently;
+zero, missing and opaque values cannot establish GPU inactivity. No live
+GPU execution, MMIO, RPS, RC6 or power changes are tested by CI.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched
