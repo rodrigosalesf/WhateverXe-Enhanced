@@ -66,9 +66,20 @@ jobs:
           "$tidy" tests/xelp_flight_recorder.cpp -- -std=c++17 -isysroot "$sdk"
           xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -fsyntax-only tests/xelp_flight_recorder.cpp
       - name: CPU tests
-        run: |
+        run: >-
           python3 tools/test.py
-          python3 tools/test.py --require xelp_flight_recorder --require xelp_flight_recorder_mutants --require install_preflight --output build/tests/quality-required
+          --require hdmi_audio_probe
+          --require hdmi_hotplug_replay
+          --require gpu_telemetry_probe
+          --require gpu_frequency_probe
+          --require gpu_rc6_probe
+          --require display_power_probe
+          --require display13_shared_restore
+          --require frame_pacing_probe
+          --require gpu_memory_probe
+          --require xelp_flight_recorder
+          --require xelp_flight_recorder_mutants
+          --require install_preflight
       - name: Compile Metal diagnostics (no GPU execution on CI)
         run: |
           mkdir -p build/diagnostics
