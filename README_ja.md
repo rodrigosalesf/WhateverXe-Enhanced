@@ -115,11 +115,13 @@ MIPI DSI対応は**試験的**で、検証したGPD MicroPC 2・CHUWI MiniBook X
 - Alder Lake-N / Twin LakeとAlder Lake-H/P/U / Raptor Lake-H/P/UでのDisplayPort・USB-C・内蔵画面対応の拡充。
 - 画面再接続の安定性改善とシステム全体のスリープ／復帰の対応範囲拡充。
 
-## Enhanced E5 開発計画（未実装）
+## Enhanced E5 開発計画（開発中）
 
-[英語版のEnhancedロードマップ](README.md#enhanced-roadmap)を参照してください。HDMI音声の認識・再生を最優先とし、既存のMetalと表示機能の回帰を防ぎます。
+[英語版のEnhancedロードマップ](README.md#enhanced-roadmap)を参照してください。HDMI音声の認識・再生を最優先とし、既存のMetalと表示機能の回帰を防ぎます。E5.1〜E5.12の既存タスクと番号を維持し、E5の開発工程を完了してからE6を開始します。CIでの検証と実機での機能確認を区別し、未解決の機能修正や実機試験を明記します。未解決のE5機能修正を残してE6へ移行する場合は、メンテナーの明示的な承認が必要です。
 
+- E5.1〜E5.3：HDMI音声の認識、EDID/ELDとPCMストリーム、再接続・復帰。
 - E5.4〜E5.6：GPUクロック、カウンター、メモリー管理、RPS、ForceWake、RC6を低負荷の読み取り専用計測から検証。
+- E5.7：ディスプレイ電源、DC5/DC6、フレームバッファー復元。
 - E5.8：Metalのバッファー共有テクスチャ、ミップマップ、メモリー整合性、同期および画像処理のテストを拡充。
 - E5.9：フレーム間隔とVBlankの計測、CPU/GPU同期の調査。
 - E5.10：クライアント別のメモリー・キュー・コンテキストの診断。
@@ -128,29 +130,35 @@ MIPI DSI対応は**試験的**で、検証したGPD MicroPC 2・CHUWI MiniBook X
 
 [MeowXE3](https://github.com/cuadra8998/MeowXE3/blob/main/docs/FINDINGS.md)は診断と試験手法の参考資料です。異なるXe3ドライバー構成であり、直接導入するものではありません。既存のXe-LP構成、AMFIAnchor、BSD-3-Clauseライセンスを維持し、コードの取り込み前に個別のライセンスを確認します。固定GPUクロック、Xe3ファームウェア、AMFI無効化設定は移植しません。Vulkan/Metal変換は現時点の対象外です。
 
-## Enhanced E6 — Metal 3 & Advanced Graphics（計画）
+## Enhanced E6 — Metal 3 & Advanced Graphics（改訂計画）
 
-E6全体を、対応するXe-LP GPUでの実質的なMetal 3対応の調査に割り当てます。E5を基盤とし、既存のAppleドライバー構成とMetal 2の動作を維持します。
+対応するIntel Xe-LP GPUの完全で安定したグラフィックス環境を長期目標とします。E6全体は実質的なMetal 3対応の研究に割り当て、既存のMetal 2とAppleドライバー構成を維持します。機能フラグや表示だけを偽装しません。
 
 | モジュール | 計画 |
 | --- | --- |
-| E6.1 | MetalのGPUファミリー、機能、リソース上限、ドライバーとOSの調査 |
-| E6.2 | [AppleのMetal機能表](https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf)との比較、未対応・未検証機能の特定 |
-| E6.3 | AIR/GPUCompiler、コンパイラーアダプター、Intelバックエンドの互換性検証 |
-| E6.4 | Argument buffer、リソースバインディング、テクスチャ、ヒープ、メモリー整合性の検証 |
-| E6.5 | 間接コマンド、同期、スケジューリング、リソース寿命の検証 |
-| E6.6 | 機能別のMetal検証スイートとMetal 2回帰テスト |
-| E6.7 | 必要な機能を確認した構成に限定した試験的なMetal 3有効化と復旧手段 |
+| E6.1 | GPUファミリー、デバイス、OS、ドライバーと機能の基準調査 |
+| E6.2 | [AppleのMetal機能表](https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf)との比較、必須・任意・未検証機能の整理 |
+| E6.3 | Graphicsスタック、ABI、バイナリーの由来、署名と再現可能な入力の調査 |
+| E6.4 | AIR/GPUCompiler、コンパイラーアダプター、Intelバックエンドの互換性 |
+| E6.5 | Argument buffer、リソースバインディング、ヒープ、メモリー整合性と寿命 |
+| E6.6 | テクスチャ形式、圧縮、MSAA、描画パイプラインの検証 |
+| E6.7 | 間接コマンド、キュー、同期、スケジューリングと復旧 |
+| E6.8 | Metal Performance Shaders、MetalFX等の対応範囲とアプリ互換性 |
+| E6.9 | 機能別の検証スイート、出力確認、負荷試験、Metal 2回帰テスト |
+| E6.10 | 要件を確認した構成に限定した試験的有効化と復旧手段 |
 
-初期段階ではGitHub Actionsでビルド、CPUテスト、静的検査、診断ツールの検証を実施します。実機GPUテストは後日実施し、CI成功だけではMetal 3対応と判断しません。表示上のバージョンや機能フラグを偽装せず、要件を満たせない場合は既存のMetalレベルを維持します。AMFIAnchorとライセンスを維持し、MeowXE3は比較調査の参考に限定します。
+[Graphicsの由来と署名](https://github.com/b00t0x/WhateverXe-Graphics/blob/v0.4.5/docs/SOURCES.md)を調査します。既存のパッケージ作成工程は、事前に改変・署名されたバイナリーを使用します。Graphics Enhancedの研究では、適法な入力、個別ライセンス、再現可能なパッチと信頼チェーンを先に確認します。AMFIAnchorを維持し、MeowXE3は比較研究に限定します。必須機能を確認できない場合は既存のMetalレベルを維持します。
 
 ### 今後のマイルストーン
 
-- E7 — 動画のハードウェアアクセラレーションとマルチメディア検証。
-- E8 — macOSのバージョン別互換性と回帰テスト。
-- E9 — 実機検証に基づく機種固有の改善。
+| 世代 | 主な対象 |
+| --- | --- |
+| E7 — Multimedia & Hardware Video Acceleration | Quick Sync、VideoToolbox、H.264、HEVC、VP9/AV1デコードの可能性、VA/AppleGVA、色変換、動画アプリ。Xe-LPでのAV1ハードウェアエンコードは約束しない。 |
+| E8 — Advanced macOS Graphics Integration | OpenGL/OpenCL、WindowServer、フレーム間隔、eDP/HDMI/DP/USB-C、複数画面、HiDPI、色管理、対応可能なHDR、OS別ABI。 |
+| E9 — Hardware Optimization & Reliability | GGTT/PPGTT、URB、キャッシュ、キュー、プリエンプション、RPS/RC6/ForceWake、リセット・復帰、機種別最適化。 |
+| E10 — Full Xe-LP Graphics Qualification | 構成別機能表、長時間の混合負荷、映像・音声・復帰、同条件での比較、再現可能な成果物、導入とロールバック、コミュニティ検証。 |
 
-いずれも計画であり、実機検証前の対応を保証するものではありません。
+詳細なモジュールと終了条件は[英語版ロードマップ](README.md#enhanced-roadmap)を参照してください。各PRではGitHub ActionsのCPU・回帰テストとDEBUG/RELEASEビルドを必須とし、実機検証は別に記録します。CI成功だけではMetal 3、HDMI音声、電力改善や完全な実機対応を証明できません。対応外の物理機能を約束せず、E4の復旧手段を維持します。
 
 ## ビルドとテスト
 
