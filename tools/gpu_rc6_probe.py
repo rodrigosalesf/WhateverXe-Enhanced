@@ -43,7 +43,7 @@ def decode(data):
         result["status"] = "epoch-changed"
     elif c0 is None or c1 is None:
         result["status"] = "counter-unavailable"
-    elif elapsed >= WRAP_NS:
+    elif elapsed + TICK_NS >= WRAP_NS:
         result["status"] = "ambiguous-wrap-window"
     else:
         # Gen12 non-LP9: 32-bit residency in 1.28 us units (Linux i915
