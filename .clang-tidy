@@ -1,0 +1,6 @@
+---
+Checks: '-*,clang-analyzer-core.*,clang-analyzer-cplusplus.*,bugprone-use-after-move,bugprone-sizeof-expression'
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(^|/)WhateverXe/kern_xelp_flight_recorder\.hpp$'
+FormatStyle: none
+...
