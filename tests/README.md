@@ -131,6 +131,28 @@ query on macOS. The tool does not measure frequency or activity independently;
 zero, missing and opaque values cannot establish GPU inactivity. No live
 GPU execution, MMIO, RPS, RC6 or power changes are tested by CI.
 
+### E5.5 Xe-LP frequency snapshot decoder
+
+Run `python3 tools/test.py --only gpu_frequency_probe --require gpu_frequency_probe`.
+The offline tool `python3 tools/gpu_frequency_probe.py snapshot.json` decodes
+caller-supplied unsigned 32-bit register words with explicit layout
+`intel-xe-lp-gen12`. Optional JSON fields are rp_state_cap (0x145998),
+freq_info_rec (0x145ef0), rpstat1 (0x1381b4), and rpnswreq (0xa008).
+The first two provide nominal RP0/RP1/RPn limits in 50 MHz units;
+actual and request opcodes use 50/3 MHz units. RP1 comes from FREQ_INFO_REC,
+not the legacy RP_STATE_CAP middle byte. Reference: Linux v6.12 i915
+[intel_rps.c](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/i915/gt/intel_rps.c),
+[intel_gt_regs.h](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/i915/gt/intel_gt_regs.h)
+and [intel_mchbar_regs.h](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/i915/intel_mchbar_regs.h).
+The tests exercise the actual decoder and CLI with independent literal fixtures,
+including conversion rounding, field width, invalid/missing/all-ones words,
+zero, inconsistent limits and comparisons without clamping.
+RP0 is a nominal non-overclocked limit; the request register is not proof of
+the driver's software target or GuC policy. Input identity, actual register
+mapping, access ownership, coherent sampling and physical clocks remain
+unverified. This tool neither acquires forcewake nor performs MMIO or changes
+frequency policy. No hardware power or performance improvement is claimed.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched
