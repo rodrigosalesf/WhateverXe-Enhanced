@@ -147,7 +147,8 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(result["nodes"], [])
 
     def test_pci_audio_candidates_include_dsp_and_hda_class_codes(self):
-        registry = plistlib.dumps([{"class-code": 0x04010000},
+        registry = plistlib.dumps([{"class-code": 0x04010000,
+                                    "vendor-id": 0x8086, "device-id": 0x51c8},
                                    {"class-code": 0x04030000}])
         result = probe.registry_class(
             "IOPCIDevice", lambda args, timeout=15: registry)
@@ -155,6 +156,9 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(result["pci_dsp_audio_class_candidates"], 1)
         self.assertEqual(result["pci_hda_class_candidates"], 1)
         self.assertEqual(result["pci_audio_class_candidates"], 2)
+        self.assertEqual(result["pci_audio_class_devices"], [
+            {"class-code": "0x401", "vendor-id": "0x8086", "device-id": "0x51c8"},
+            {"class-code": "0x403"}])
 
     def test_unavailable_is_not_zero(self):
         report = probe.collect(lambda args, timeout=15: None)

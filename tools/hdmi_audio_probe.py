@@ -222,12 +222,27 @@ def registry_class(cls, run=command):
         class_codes = [numeric_property(node.get("class-code")) for node in decoded]
         class_codes = [code for code in class_codes if code is not None]
         result["pci_class_code_observations"] = len(class_codes)
-        for subclass, label in ((0x0401, "pci_dsp_audio_class_candidates"),
-                                (0x0403, "pci_hda_class_candidates")):
-            result[label] = sum(
-                1 for code in class_codes
-                if (((code >> 16) & 0xffff) == subclass
-                    or ((code >> 8) & 0xffff) == subclass))
+        audio_devices = []
+        subclasses = []
+        for node in decoded:
+            code = numeric_property(node.get("class-code"))
+            if code is None:
+                continue
+            subclass = next((candidate for candidate in
+                             ((code >> 16) & 0xffff, (code >> 8) & 0xffff)
+                             if candidate in (0x0401, 0x0403)), None)
+            if subclass is None:
+                continue
+            subclasses.append(subclass)
+            item = {"class-code": f"0x{subclass:x}"}
+            for key in ("vendor-id", "device-id"):
+                value = numeric_property(node.get(key))
+                if value is not None:
+                    item[key] = f"0x{value:x}"
+            audio_devices.append(item)
+        result["pci_audio_class_devices"] = audio_devices
+        result["pci_dsp_audio_class_candidates"] = subclasses.count(0x0401)
+        result["pci_hda_class_candidates"] = subclasses.count(0x0403)
         result["pci_audio_class_candidates"] = (
             result["pci_dsp_audio_class_candidates"] +
             result["pci_hda_class_candidates"])
