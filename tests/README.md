@@ -90,6 +90,29 @@ The EDID is optional. Comparisons report intersection/differences in explicit
 PCM rate evidence, not an association between physical displays or proof of
 playback. No kernel changes or new boot arguments are included.
 
+### E5.3 offline HDMI lifecycle replay
+
+Run `python3 tools/test.py --only hdmi_hotplug_replay --require hdmi_hotplug_replay`.
+The user-space replay consumes a bounded JSON event list for one modeled
+connector. Each connect, disconnect, suspend or resume invalidates prior ELD
+evidence and advances its epoch. ELD results must carry their acquisition
+epoch; stale results do not overwrite current evidence, and current invalid
+samples revoke it. Resume requires a fresh connection event. These are
+conservative replay rules, not assertions about native Apple framebuffer or
+HDA event delivery. Fixtures cover duplicate connect, different sink,
+late completion, malformed current and stale samples, suspend/resume,
+inactive samples, invalid input and CLI redaction. This uses the actual ELD
+parser and report consumer. It does not implement kernel callbacks, real
+multi-display ownership, locking, audio stream teardown or hardware recovery.
+
+Replay an offline file with `python3 tools/hdmi_hotplug_replay.py events.json`.
+Events are objects such as `{"event":"connect"}`, `{"event":"disconnect"}`,
+`{"event":"suspend"}`, `{"event":"resume"}` or
+`{"event":"eld","epoch":1,"hex":"..."}` (hex must be actual bytes).
+Epochs begin at zero and advance on accepted lifecycle events. No raw ELD
+or arbitrary input text is included in reports. Input is limited to 1 MiB,
+1024 events and 4096 ELD bytes per sample.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched
