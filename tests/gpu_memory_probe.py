@@ -100,6 +100,40 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(r["clients"], [])
         self.assertEqual(r["allocations"]["observed"], 0)
 
+    def test_registry_text_high_bit_and_duplicates(self):
+        raw = "18446744073622759680"
+        text = ('"inUseSysMemoryBytes"=' + raw + '\n') * 2
+        text += '"inUseVidMemoryBytes"=0, "orphanedReusableSysMemoryBytes"=393453568'
+        report = probe.analyze_registry_text(text)["counters"]
+        self.assertEqual(report["inUseSysMemoryBytes"]["distinct_values"], [
+            {"raw_decimal": raw, "occurrences": 2, "status": "high-bit-set",
+             "signed_int64_candidate": "-86791936"}])
+        self.assertEqual(report["inUseVidMemoryBytes"]["distinct_values"][0]["raw_decimal"], "0")
+        self.assertEqual(report["orphanedNonReusableSysMemoryBytes"]["distinct_values"], [])
+
+    def test_registry_text_boundaries_and_invalid(self):
+        text = '\n'.join('"inUseSysMemoryBytes"=' + str(x) for x in
+                         (2**63 - 1, 2**63, 2**64 - 1, 2**64, -1, "secret", "1.5"))
+        report = probe.analyze_registry_text(text)["counters"]["inUseSysMemoryBytes"]
+        self.assertEqual(report["invalid_tokens"], 4)
+        self.assertEqual([r["status"] for r in report["distinct_values"]],
+                         ["unsigned-observed", "high-bit-set", "all-ones-ambiguous"])
+        self.assertNotIn("signed_int64_candidate", report["distinct_values"][-1])
+        self.assertNotIn("secret", json.dumps(report))
+        with self.assertRaises(ValueError):
+            probe.analyze_registry_text(" " * (probe.MAX_INPUT + 1))
+
+    def test_registry_text_cli(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "registry.txt"
+            path.write_text('"inUseSysMemoryBytes"=18446744073622759680')
+            cmd = [sys.executable, probe.__file__, "--registry-text", str(path)]
+            r = subprocess.run(cmd, capture_output=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(json.loads(r.stdout)["schema"], "wex-memory-registry-text-v1")
+            path.write_bytes(b"\xff")
+            self.assertEqual(subprocess.run(cmd, capture_output=True).returncode, 2)
+
     def test_cli_and_privacy(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "memory.json"

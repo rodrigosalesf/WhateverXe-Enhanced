@@ -6,6 +6,7 @@ No allocation, task, queue or context identity is discovered by this tool.
 """
 import argparse
 import json
+import re
 import sys
 
 MAX_INPUT = 4 * 1024 * 1024
@@ -113,16 +114,69 @@ def analyze(snapshot):
     }
 
 
+# Text snapshots are diagnostic evidence only. Repeated registry properties can
+# be aliases of the same accelerator; never add their values together.
+COUNTER_KEYS = ("inUseSysMemoryBytes", "inUseVidMemoryBytes",
+                "orphanedReusableSysMemoryBytes", "orphanedNonReusableSysMemoryBytes")
+COUNTER_PATTERN = re.compile(
+    r'"(' + "|".join(COUNTER_KEYS) + r')"\s*=\s*([^\s,}]+)'
+)
+
+
+def analyze_registry_text(snapshot):
+    if not isinstance(snapshot, str) or len(snapshot) > MAX_INPUT:
+        raise ValueError("invalid registry text")
+    observations = {key: {} for key in COUNTER_KEYS}
+    invalid = dict.fromkeys(COUNTER_KEYS, 0)
+    for match in COUNTER_PATTERN.finditer(snapshot):
+        key, token = match.groups()
+        if not re.fullmatch(r"[0-9]{1,20}", token):
+            invalid[key] += 1
+            continue
+        value = int(token)
+        if value > U64_MAX:
+            invalid[key] += 1
+            continue
+        counts = observations[key]
+        counts[value] = counts.get(value, 0) + 1
+
+    counters = {}
+    for key, counts in observations.items():
+        samples = []
+        for value, occurrences in sorted(counts.items()):
+            record = {"raw_decimal": str(value), "occurrences": occurrences}
+            if value == U64_MAX:
+                record["status"] = "all-ones-ambiguous"
+            elif value >= 1 << 63:
+                record["status"] = "high-bit-set"
+                record["signed_int64_candidate"] = str(value - (1 << 64))
+            else:
+                record["status"] = "unsigned-observed"
+            samples.append(record)
+        counters[key] = {"distinct_values": samples, "invalid_tokens": invalid[key]}
+    return {"schema": "wex-memory-registry-text-v1", "counters": counters,
+            "limitations": [
+                "Text matches do not establish accelerator identity or coherent capture.",
+                "Repeated values are occurrences, not separate allocations; never sum them.",
+                "High bit or all-ones is suspicious, not proof of arithmetic underflow.",
+                "Signed candidate is an interpretation only, not a corrected byte count.",
+                "Missing fields are not zero; no driver or accounting state is changed."
+            ]}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("snapshot", help="offline normalized allocation/ownership JSON")
+    parser.add_argument("snapshot", help="offline normalized allocation/ownership JSON or registry text")
+    parser.add_argument("--registry-text", action="store_true",
+                        help="inspect raw byte-counter observations without attribution")
     args = parser.parse_args()
     try:
         with open(args.snapshot, "rb") as f:
             data = f.read(MAX_INPUT + 1)
         if len(data) > MAX_INPUT:
             raise ValueError("input exceeds limit")
-        report = analyze(json.loads(data))
+        report = (analyze_registry_text(data.decode('utf-8')) if args.registry_text
+                  else analyze(json.loads(data)))
     except (OSError, ValueError, RecursionError):
         parser.exit(2, "Invalid or unsupported memory snapshot.\n")
     print(json.dumps(report, indent=2, sort_keys=True))
