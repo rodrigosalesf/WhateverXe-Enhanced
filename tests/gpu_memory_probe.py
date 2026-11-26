@@ -26,6 +26,80 @@ def snapshot():
 
 
 class MemoryTests(unittest.TestCase):
+    def test_registry_series_deltas_require_one_unambiguous_observation(self):
+        high = str(2**63 + 8)
+        report = probe.analyze_registry_series([
+            {"elapsed_ns": 0, "captured_at_utc": "2026-01-01T00:00:00+00:00",
+             "registry_text": '"inUseSysMemoryBytes"=100'},
+            {"elapsed_ns": 1_000_000_000, "captured_at_utc": "2026-01-01T00:00:01+00:00",
+             "registry_text": '"inUseSysMemoryBytes"=125'},
+            {"elapsed_ns": 2_000_000_000, "captured_at_utc": "2026-01-01T00:00:02+00:00",
+             "registry_text": '"inUseSysMemoryBytes"=' + high},
+            {"elapsed_ns": 3_000_000_000, "captured_at_utc": "2026-01-01T00:00:03+00:00",
+             "registry_text": '"inUseSysMemoryBytes"=125'},
+            {"elapsed_ns": 4_000_000_000, "captured_at_utc": "2026-01-01T00:00:04+00:00",
+             "registry_text": '"inUseSysMemoryBytes"=125\n"inUseSysMemoryBytes"=125'},
+            {"elapsed_ns": 5_000_000_000, "captured_at_utc": "2026-01-01T00:00:05+00:00",
+             "registry_text": '"inUseVidMemoryBytes"=7'},
+        ])
+        samples = report["samples"]
+        self.assertEqual(report["schema"], "wex-memory-registry-series-v1")
+        self.assertEqual(samples[1]["counters"]["inUseSysMemoryBytes"]["delta_from_previous"],
+                         {"status": "computed", "bytes": 25, "elapsed_ns": 1_000_000_000})
+        self.assertEqual(samples[2]["counters"]["inUseSysMemoryBytes"]["delta_from_previous"]["status"],
+                         "suspicious-value")
+        self.assertEqual(samples[4]["counters"]["inUseSysMemoryBytes"]["delta_from_previous"]["status"],
+                         "ambiguous-observation")
+        self.assertEqual(samples[5]["counters"]["inUseSysMemoryBytes"]["delta_from_previous"]["status"],
+                         "missing-observation")
+        self.assertNotIn("registry_text", json.dumps(report))
+
+    def test_registry_series_rejects_nonmonotonic_and_malformed_samples(self):
+        valid = {"elapsed_ns": 0, "captured_at_utc": "2026-01-01T00:00:00+00:00",
+                 "registry_text": '"inUseSysMemoryBytes"=100'}
+        for samples in ([valid, {**valid, "elapsed_ns": 0}],
+                        [{**valid, "captured_at_utc": "not-a-time"}],
+                        [{**valid, "elapsed_ns": True}],
+                        [{**valid, "unexpected": "field"}]):
+            with self.subTest(samples=samples), self.assertRaises(ValueError):
+                probe.analyze_registry_series(samples)
+
+    def test_temporal_collector_uses_read_only_ioreg_and_keeps_failures_as_gaps(self):
+        class Clock:
+            elapsed = 0
+
+            def monotonic_ns(self):
+                return self.elapsed
+
+            def sleep(self, seconds):
+                self.elapsed += int(seconds * 1_000_000_000)
+
+        clock = Clock()
+        calls = []
+
+        class Result:
+            stdout = '"inUseSysMemoryBytes"=100'
+
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            if len(calls) == 2:
+                raise OSError("fixture failure")
+            return Result()
+
+        timestamps = iter(("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:01+00:00",
+                           "2026-01-01T00:00:02+00:00"))
+        result = probe.collect_registry_series(2, 1, run_capture=run, sleep=clock.sleep,
+                                               monotonic_ns=clock.monotonic_ns,
+                                               utc_now=lambda: next(timestamps))
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[0][0], ["ioreg", "-l", "-w0", "-p", "IOService"])
+        self.assertTrue(calls[0][1]["check"])
+        self.assertEqual([sample["capture_status"] for sample in result["samples"]],
+                         ["ok", "capture-failed", "ok"])
+        self.assertIsNone(result["samples"][1]["counters"])
+        self.assertEqual([sample["elapsed_ns"] for sample in result["samples"]],
+                         [0, 1_000_000_000, 2_000_000_000])
+
     def test_partition_no_double_count(self):
         r = probe.analyze(snapshot())
         self.assertEqual(r["bytes"], {"valid_observed_total": 13824,

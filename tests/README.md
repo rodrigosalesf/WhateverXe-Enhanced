@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 14708)
+Total output lines: 665
+
 # CPU test contracts
 
 These tests check bounded CPU behavior, dependency metadata and selected driver
@@ -269,12 +272,23 @@ and links, invalid schemas, excessive input and aggregate overflow fail
 closed. Invalid byte sizes are counted separately. Client IDs are replaced
 by local ordinals in the report; these are not stable across captures.
 
-Nine host-only tests exercise the actual accounting and CLI, including
-conflicts, missing links, shared allocations, bounds and redaction. These
-are synthetic allocation graphs, not live IORegistry ownership evidence.
+Fifteen host-only tests exercise the actual accounting, registry parser,
+time-series analyzer and CLI, including conflicts, missing links, shared
+allocations, duplicate observations, failed captures, bounds and redaction.
+These are synthetic allocation graphs and registry text, not live ownership
+evidence.
 Observed bytes do not establish physical residency, GART usage or complete
 per-process VRAM; shared bytes are not duplicated in exclusive totals.
-No live queue collector, memory allocation policy, eviction or kernel
+The optional macOS collector samples `ioreg -l -w0 -p IOService` without
+changing system state. For example, `python3 tools/gpu_memory_probe.py
+--collect-duration 600 --interval 5 --output memory-series.json` captures
+for ten minutes. It discards the raw registry dump and writes only UTC/elapsed
+capture times and matching counter values. A delta is calculated only between
+adjacent successful samples with exactly one valid occurrence per capture;
+duplicate matches, high-bit values, missing properties and failed captures
+remain explicit and do not become zeroes. The collector does not establish
+accelerator identity, allocation ownership or causation, and it cannot be run
+by the host-only test suite. No memory allocation policy, eviction or kernel
 changes are included. Existing queue-trace and memory-layout guards remain
 unchanged; native ownership/lifetime validation is still pending.
 
@@ -296,242 +310,7 @@ registered semantic-mutant test requires real assertion failures when
 chronological ordering or freeze protection is deliberately broken.
 Conceptual references: [Linux tracing ring-buffer design](https://docs.kernel.org/trace/ring-buffer-design.html)
 and [Mesa hang debugging](https://docs.mesa3d.org/graphics-debugging/debugging-misrenderings-crashes.html).
-No third-party recorder implementation is copied.
-
-This core is not installed or called by the kernel yet. It requires a
-single owner or external serialization, a verified timestamp source and
-an approved export contract before wiring any runtime producer/consumer.
-No IRQ safety, concurrent writers, kernel dump persistence, live collection,
-or performance overhead measurement is demonstrated. No additional boot
-arguments or default driver behavior changes are introduced.
-
-### E5.12 read-only installation preflight
-
-Run `python3 tools/test.py --require install_preflight`.
-The offline tool `python3 tools/install_preflight.py config.plist --darwin 24.6.0`
-checks the standard post-install OpenCore configuration documented in the
-README and [AMFIAnchor OpenCore instructions](https://github.com/b00t0x/AMFIAnchor#install-with-opencore).
-The caller explicitly supplies the target Darwin version, within 20–25.
-Enabled canonical top-level kext names are filtered by architecture and
-inclusive kernel bounds. Report missing or duplicated required entries,
-Lilu/anchor/injector ordering, incompatible WhateverGreen coexistence,
-AMFIPass ordering and departures from the documented boot arguments and
-SIP setting. These are configuration findings, not proof of boot failure.
-Custom injectors, renamed bundles, installer profiles, NVRAM overrides and
-actual bundle versions/identities are not validated. No personal config
-fields, serial numbers, filenames or raw arguments are printed.
-
-An optional `--backup-config backup.plist` checks a separate readable
-configuration with the same policy; it rejects the same file (including
-aliases). It does not create or validate a full EFI backup or restore it.
-Exit 0 means no known findings in the supplied configuration(s), 1 means
-findings, 2 means invalid or unavailable input. Eight host-only tests
-exercise the actual parser and CLI. Input is bounded and no configuration
-or EFI files are written. Before installation, separately verify the full
-backup, matching OpenCore ocvalidate, bundle files, Lilu version, Graphics
-payload, hardware identity and DVMT. Existing build-time Compat ABI/export
-checks, x86_64 packaging and dSYM UUID checks remain mandatory and unchanged.
-No new native ABI support or hardware bootability is established.
-
-### Enhanced quality gate (initial scoped baseline)
-
-The mandatory `Test and build` job runs Ruff 0.11.13 (F63/F7/F82: selected
-Pyflakes correctness rules) on E5 Python probes and tests, actionlint 1.7.11
-on ci.yml (workflow validation only; external shellcheck/pyflakes integrations
-disabled), and the runner's Homebrew LLVM 18 Clang-Tidy on
-tests/xelp_flight_recorder.cpp, including the recorder header. Clang-Tidy
-uses the checked-in analyzer/bugprone subset with warnings as errors;
-the same host fixture is compiled with strict warnings. Configuration files
-provide formatting defaults; whole-tree formatting is not enforced or
-applied automatically. Extend the scoped checks as new code is introduced.
-The runner image is not a pinned compiler build; log actual tool versions.
-
-The CPU test runner still executes its full default suite and explicitly
-requires every E5 registered CPU contract (including shared restoration,
-flight-recorder semantic mutants and installation preflight). Existing
-ASan/UBSan host fixtures, Metal Swift compilation and self-test, DEBUG/RELEASE
-builds, Compat ABI/export checks and packaging checks are retained.
-Optional native donor modes still require exact inputs and report omissions.
-The initial quality gate neither statically analyzes the complete kernel nor
-validates Swift style, hardware behavior, native ABI execution or Metal 3.
-Do not claim CodeQL, SwiftLint, Cppcheck, or other tooling is enabled until
-its own configured workflow actually executes.
-
-## Maintaining test contracts
-
-`tgl_recovery` runs the production wrapper and helper against ABI-matched
-reset, scheduler, event-machine, submit and wait callees. The exact TGL donor's
-successful non-render branch provides the increment/submit/one-second wait
-sequence; only Blit uses it here. For other engines and failed resets the ICL
-single-pass ordering and accounting remain mandatory. The fixture checks the
-real affected channel, two reload points, raw timeout polarity, no stamp on an
-absent affected channel, bounded call counts and published outcomes. Semantic
-mutants exercise lost or duplicated work, erroneous gating and failure effects.
-This CPU check does not execute the donor's callback bodies, Lilu installation,
-IOAccel locking, GPU execution or stamp retirement. The exact donor guards and
-an observed live recovery are required at those boundaries.
-
-`tgl_reset_poll_native` executes the production installer, naked bridge and
-bounded full-width GDRST helper inside the fixed TGL reset body. It preserves
-native scratch writes, forcewake release and context-replay/false exits, checks
-the VECS bit above bit 7 and detects timeout, truncation and cleanup mutants.
-MMIO acknowledgement, time/forcewake and the scheduler replay leaf are models;
-this does not establish electrical reset or GPU progress.
-
-`tgl_recovery_native` takes `--accelerator` and `--ioaccel`.
-The accepted Big Sur through Tahoe originals execute eventTimeout, FIFO restart,
-diagnosis selection, native stamp resubmission, stamp comparison/deduplication,
-fence notifier/list retirement, the real BlockFence client payload callback and
-the synchronous finish_fence_event caller. Native IOAccel owns the synchronous wait, its shared
-cache writeback, interrupt deregistration and wait-time accounting. The replay
-checks both an already-reached target (zero wait time) and a normal arrival
-inside the wait (the same duration reaches both reporter channels). It also
-checks late fence retirement once and a subsequent normal submission. For Compute, the native watchdog
-progress check cancels a stale restart before the engine halt and admits a still-stalled channel.
-The exact timeout routine returns the affected channel to FIFO while RESET_CTRL
-indicates readiness. The device model clears that hold on an acknowledged
-domain reset and retains it on an unacknowledged one. Neither readiness nor
-the scheduler returning to the running state delivers a pending client fence.
-Compute and media run the donor's beginReset, ring rebuild, updateRingTail,
-endReset, descriptor selection and SQ/LOAD stores into RAM. The output records
-both the command producer's tail and the context image tail after restart.
-Dropping LOAD or clearing the force-restore flag must fail before any stamp
-is supplied. CPU submission does not establish GPU execution.
-The notification cases take hardware stamp arrival as an independent input,
-using the address and value decoded from Compute PIPE_CONTROL or media
-MI_FLUSH_DW. Kernel scheduling/locks, VM mappings, forcewake, interrupt
-delivery, diagnostic report publication, idle accounting, DMA and normal
-scheduler enqueue capacity remain modeled. An observer bounds the native
-pending-wait case in a child. A permanently missing stamp can leave callers
-waiting. The retained state does not establish recovery, safe teardown or idle.
-
-Apply these rules to implementation changes and test additions, corrections,
-merges and removals. An existing passing test is not an approved specification.
-The [check inventory](#independent-expectations-and-boundaries) describes selected
-checks; it is not certification of every assertion or of the entire suite.
-
-Before a change, identify the intended behavior and retained behavior, then
-choose the production paths and tests needed to protect them. Keep a short
-description near the test, in this document or in the change description:
-
-| Record | What to identify |
-| --- | --- |
-| Contract and basis | Accepted capabilities, required effects, owner/order/failure rules; specification, reference implementation, exact donor caller/consumer or immutable positive history |
-| Tested path | Production entry, input producer, state propagation and consumer; explicitly modeled prerequisites and hardware/OS boundaries |
-| Counterexamples | Invalid rejection, missing work, wrong delegation, duplicate effects or another plausible error that must fail; valid inputs and meaning-preserving variations that must still pass |
-| Execution and limits | Required modes/inputs, tested source and result locations, omitted paths and conclusions the check cannot support |
-
-Reuse an existing description when it still applies. Do not create a separate
-form for every assertion or copy implementation conditions into an oracle.
-Synthetic cases need a contractual basis; retained readouts need provenance.
-Capacity, bit position, OS metadata and layout should vary independently where
-the consumer contract allows it. Previous positive inputs remain independent
-protections; previous negative inputs must not freeze an admission limit.
-
-WEX owns the required adaptation for target Xe-LP devices, including reused
-native paths. A branch declining work must reach another correct WEX handler
-or a native path expected to work for a stated reason. Preserve shared handling
-for the same contract and split confirmed differences. Test both responsibility
-gaps and wrong backend selection. Mismatch with an observed configuration,
-resource tuple, build metadata or fixture size alone is not a rejection reason.
-Preserve actual ownership, input-safety, ABI and fixed-donor identity guards.
-If a required operation or ABI cannot be established, keep the corresponding
-consumer unready and record the missing capability. Refusal is not completed
-support for that capability.
-
-Use real production code for the dependency decisions and state propagation
-being tested. A direct helper check does not prove its caller reaches it.
-An explicit `true` prerequisite is still a model assumption: identify how the
-real producer establishes it and test the connection where required. Do not
-auto-enable fields or dependencies discovered in production source. Check the
-effect at the consumer, including failure, retry, reentry and missing events
-where relevant. A successful return or internal ready flag need not mean that
-the requested work occurred. For shared notifications, model native ownership
-and delivery as well as WEX calls.
-
-On failure, compare both the test model and production against the independent
-contract. Fix the incorrect side, which can be both. Distinguish fixture API
-updates from changes to expected behavior; record the basis for the latter.
-Do not delete a valid input, add a success stub or skip a mode to make a known
-defect pass. Do not restore an obsolete candidate policy merely for an old test;
-establish whether its original requirement was valid and where it is protected.
-If the contract remains unresolved, keep that uncertainty visible.
-
-Before deleting or merging tests, identify each useful contract, boundary and
-counterexample and where its protection remains. Move unique protection first.
-Keep useful structural lint labeled as such; neither test counts nor source
-spelling can substitute for behavior checks.
-For important contract changes, demonstrate a relevant semantic fault failing
-at the intended behavior assertion. Reuse suitable existing counterexamples;
-extraction/compile failures are not evidence of detecting the intended defect.
-Do not require a global mutation score or a new framework.
-
-Register new scripts and modes in `tools/test.py`, with distinct job names,
-required inputs and correct kinds. Shared helpers need registered callers.
-Run the modes required by the affected contract with `--require`; the default
-CI command does not supply optional original inputs. Registration completeness
-does not prove requirement coverage. Keep per-run failures and omissions,
-including when a later run resolves them. Combine complementary runs only when
-their source, fixtures and input contracts correspond; do not select passing
-fragments to hide unresolved failures. Update the relevant descriptions when
-contracts, boundaries or modes change. Report those boundaries, required-mode
-results and limits before aggregate counts, and keep build and hardware claims
-separate from CPU assertions.
-
-## Selecting and requiring checks
-
-```sh
-python3 tools/test.py --list
-python3 tools/test.py --only profile_admission --only display13_power_dispatch
-python3 tools/test.py --accelerator /path/to/AppleIntelTGLGraphics --only tgl_gt2_urb_native --require tgl_gt2_urb_native
-```
-
-`--list` includes modes whose inputs are absent. `--only` is repeatable and
-accepts shell-style patterns; quote patterns to keep the shell from expanding
-them. `--require` also selects its matches and makes missing inputs a failure.
-Default CPU checks can succeed with optional binary checks skipped. The result
-records those omissions; that success must not be described as binary replay.
-The `binary-check` kind means an original input was supplied. Individual
-checks may validate bytes, execute selected instructions, or both; it does not
-mean that the complete original driver executed.
-
-Each invocation creates a new directory under `build/tests/run-*`, or uses the
-new directory supplied with `--output`. Each job has its own `test.log`.
-`results.json` records passed, failed, skipped and not-selected jobs. Core C++
-jobs with the same stem as a Python adapter have an explicit `_cpp` suffix;
-both run and neither result overwrites the other. `fully_executed` refers only
-to this job inventory, never to hardware/function coverage.
-
-Compile and execute stages are distinct for direct C++ jobs. Python replay jobs
-report a script stage; their inner extraction/compiler/runtime diagnostics are
-in the log, rather than being classified from a return code alone.
-
-The original Apple inputs are optional, local and untracked. Use the exact
-inputs accepted by each replay. Kernel and host modes also need Lilu HDE via
-`--hde-source`. Do not put Apple driver files in this repository or public CI.
-Additional modes declare their inputs explicitly: `--linux-tables` accepts
-`intel_ddi_buf_trans.c` for the DKL coefficient oracle; `--ccs-records` accepts
-retained JSON `records` with `after.aux` and sixteen `after.words` for an aux-state
-reproduction; `--pcode-donor` supplies the distinct original required by the
-eDRAM diagnostic. Its audit copy stays in that job's output and is not deployable.
-The outer-ring check uses current production source unless `--outer-source` is
-explicitly supplied. These input identities do not restrict runtime OS updates.
-
-Every standalone Python script has an enumerated mode. `production_source.py`,
-`pmap_kernel_contract.py` and `compat_test_support.py` are shared helpers exercised by registered callers.
-The registry contract checks that newly added scripts are not silently omitted.
-
-## Independent expectations and boundaries
-
-| Check | Expectation and source | Boundary and exclusions |
-| --- | --- | --- |
-| `compat_exports.py` | Fixed `c004fc1a` donor imports, native DSB caller/field producers, mapped-memory extent, contiguous Gen12 PTE address encoding, DSB manager dispatch and zero-success return | Compiles the complete Compat translation unit with kernel/IOKit boundary mocks, retaining export asm names. Executes MMIO, DSB allocation/zeroing/PTE installation/publication, failure/retry, clock and lifecycle. Hardware DMA, the system mapper and actual DSB queue execution are outside this check |
-| Graphics activation (`compat_exports.py`, `host_publication.py`) | Either component alone must preserve firmware graphics; native drivers may start only with an active, compatible WEX plugin. Activation ABI 1 is a runtime registry token, independent of EFI/AuxKC linking | Executes the actual accepted pluginStart body, token publisher and complete Compat start consumer. Missing, malformed and incompatible tokens reject start. The early callback may copy read-only firmware facts after PCI publication; it must not initialize/configure the GPU. Actual host dispatch ignores unrelated notifications until a Graphics image arrives, then initializes once. Lilu's shouldLoad decision, OSKext dependency failure propagation, AuxKC construction and GOP scanout require separate loader/hardware validation |
-| `firmware_readout.py`, `firmware_panel_identity.cpp` | Intel OpRegion mailbox 5 and Linux v6.12 `intel_bios.c` BDB 41/42 PNP identity: exact-date match precedes an undated match; no blind profile-zero fallback. Identical child records have the same ownership; conflicting records do not | Actual early acquisition, inline/external VBT, owner cache, wiring, PPS delay and PWM consumers. Explicit indices and LFP2 are retained. Equivalent consumed facts remain usable without claiming an index; divergent candidates, malformed pointers/EDID and conflicting children cannot supply panel routing. Mapping and MMIO are modeled. Snapshot loss, foreign ownership and disconnected EDID mutations fail. Physical mailbox availability and output remain hardware boundaries |
-| ADL-S initial panel mode (`adls_panel_pwm.py`) | Fixed donor reset starts Combo mode0 before mode1 publication. The bound internal panel, controller/access association and PG1 witness independently establish PWM ownership | Production LightUpEDP wrapper captures PWM in mode0/1, then delegates once. Native mode checks the reset producer and executes the PWM tail for the first mode0 cycle and subsequent mode1 cycles. Restoring mode1-only admission fails semantically. No claim of a complete ADL-S cold engine reset or physical panel training |
-| Deferred Display13 clock (`display13_training_frontend.py`) | Exact donor stop caller defers clock removal until DDI buffer/transcoder stop. Reentry with the same owner/value is the same pending operation | Actual deferred request and stop consumer with the real power bridge and mocked MMIO. Identical repetition stays pending without a fault; conflicting values stay suppressed without overwriting the request; running DDI prevents clock removal. Physical disable timing remains outside the model |
-| `compat_producer.py` | Immutable ABI3 binding and port modes from the exact donor/Compat contract. Legacy ABI3 rejects a nonzero Alt mask | Real WEX bind, port state, direct HAL mode and both HPD dispatchers. A mixed eDP/TC board retains its panel path when a TC hook is absent and uses the same pinned provider after the TC path becomes available. A pre-Alt provider gets the representable subset. Complete Compat is executed. Native state/HPD leaves, hook installation and hardware are boundaries |
-| `display13_tiling.py` | Shared IRQ/power/clock and multi-output retirement precede native startup. The firmware transcoder identifies the boot output | Actual start prelude, provider properties and deferred boot selector. A missing TC hook permits eDP boot and blocks fixed TC boot before TC capture; restoring it reaches the existing handoff. DP-alt GOP stays unqualified. Readout, final boot-memory preparation and native start are boundary models |
+No third-party rec…4708 tokens truncated… handoff. DP-alt GOP stays unqualified. Readout, final boot-memory preparation and native start are boundary models |
 | Display13 boot link depth (`display13_linear_dp.cpp`, `display13_fb_memory.cpp`, `display13_boot.cpp`) | Linux v6.12 `i915_reg.h` TRANS_DDI_BPC encodes 8/10/6/12 bpc as 0/1/2/3; lane width is a different field. The four-byte RGB plane does not require an 8-bpc output link | Actual source readout, plane conversion, GGTT backing inspector and multi-output parking retain the firmware depth. Reserved depths fail before writes/PTE reads; drift is refused. This preserves a firmware link, not HDR or native deep-color modeset support |
 | `display13_boot_handoff.py`, `display13_training_frontend.py`, `display13_sst.py` | Fixed donor `resetSoftwareState` initializes Combo mode to 0 before `setPortMode`; exact physical config, access owner and TC modes remain required | Production setup-workloop -> SST selection -> boot AUX adoption -> port stop/re-enable, and training wrappers. Prequalified framebuffer memory and provider IRQ registration are boundaries. `display13_sst_native` checks producer bytes and replays existing native port operations; full native startup and physical link training are outside the model |
 | `display13_boot_handoff_native`, `display13_boot_resource_native`, `dsi_aperture_adapter` | Same wired port, matching or incompatible stream. Same GPU base, initial linear or subsequent tiled owner. Partial last page must belong to the pool and BAR. | Workloop adoption, actual mode decision, donor comparator and plane setup, accelerator layout producer and destroy, exact-length descriptor and balanced references. `dsi_aperture_adapter_native` returns the actual stolen-pool slot with a peer slot active and a client still retaining the descriptor. AUX replies, allocation and register transitions are modeled. Physical panel and WindowServer output need separate evidence. |
