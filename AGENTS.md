@@ -48,6 +48,24 @@ prose. CHANGELOG describes the affected behavior and OS range; applications used
 for validation are not the scope of a general fix. Credit reference repositories
 when their work informed a change.
 
+## Enhanced quality gate
+
+The existing `Test and build` job also enforces a scoped quality baseline:
+Ruff for E5 Python modules/tests, actionlint for the CI workflow and Clang-Tidy
+plus strict compiler warnings for the standalone Flight Recorder fixture.
+All E5 CPU test modes are required; original-input modes remain distinct.
+Extend lint and analysis coverage alongside new E6+ modules; do not interpret
+the initial host-only scope as whole-kernel static analysis.
+
+Use .clang-format and the Ruff formatting settings for newly authored code.
+Keep formatting-only changes separate from behavioral changes. Do not apply
+automatic fixes or whole-tree reformatting to donor-sensitive hooks, assembly,
+MMIO, ABI contracts or kernel code. Review every proposed change against the
+actual owner, OS and hardware contract. Record new analysis warnings and
+resolve them or justify a narrowly scoped exception with evidence.
+Do not disable checks to merge a failing PR. Preserve the existing build flags,
+version floors and trust chain. A green quality gate is not hardware validation.
+
 ## Build and test
 
 Before implementation or test changes, read and apply the
