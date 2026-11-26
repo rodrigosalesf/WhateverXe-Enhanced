@@ -197,6 +197,148 @@ func probeRender(_ device: MTLDevice, iterations: Int) throws -> [Timing] {
     return samples
 }
 
+// Advanced diagnostics are opt-in: preserve the default E4 workload and CLI.
+// Buffer-backed textures test alias visibility across CPU writes, GPU reads
+// and command completion. Do not silently replace a rejected linear texture.
+let linearSource = """
+#include <metal_stdlib>
+using namespace metal;
+kernel void wex_linear(texture2d<uint, access::read> input [[texture(0)]],
+                       device uint *output [[buffer(0)]],
+                       uint i [[thread_position_in_grid]]) {
+    if (i < 64u) output[i] = input.read(uint2(i % 8u, i / 8u)).r;
+}
+"""
+
+func linearValue(_ index: Int, _ seed: UInt32) -> UInt32 {
+    (UInt32(index) &* 0x10203) ^ seed ^ 0x12345678
+}
+func advancedFailure(_ message: String) -> NSError {
+    NSError(domain: "WhateverXeAdvancedMetalProbe", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message])
+}
+func probeLinearTexture(_ device: MTLDevice, iterations: Int) throws -> [Timing] {
+    let width = 8, height = 8, count = 64
+    let format = MTLPixelFormat.r32Uint
+    let alignment = device.minimumLinearTextureAlignment(for: format)
+    guard alignment > 0 && alignment <= 65536 else {
+        throw advancedFailure("linear-texture-alignment-unavailable")
+    }
+    let rowBytes = ((width * 4 + alignment - 1) / alignment) * alignment
+    let desc = MTLTextureDescriptor.texture2DDescriptor(
+        pixelFormat: format, width: width, height: height, mipmapped: false)
+    desc.storageMode = .shared
+    desc.usage = .shaderRead
+    guard let backing = device.makeBuffer(length: rowBytes * height, options: .storageModeShared),
+          let texture = backing.makeTexture(descriptor: desc, offset: 0, bytesPerRow: rowBytes),
+          let output = device.makeBuffer(length: count * 4, options: .storageModeShared),
+          let queue = device.makeCommandQueue() else {
+        throw advancedFailure("linear-texture-resource-unavailable")
+    }
+    let library = try device.makeLibrary(source: linearSource, options: nil)
+    guard let function = library.makeFunction(name: "wex_linear") else {
+        throw advancedFailure("linear-texture-function-unavailable")
+    }
+    let pipeline = try device.makeComputePipelineState(function: function)
+    let values = output.contents().bindMemory(to: UInt32.self, capacity: count)
+    var samples = [Timing]()
+    for iteration in 0..<iterations {
+        let seed = UInt32(iteration)
+        for y in 0..<height {
+            let row = backing.contents().advanced(by: y * rowBytes)
+            for x in 0..<width {
+                row.storeBytes(of: linearValue(y * width + x, seed), toByteOffset: x * 4, as: UInt32.self)
+            }
+        }
+        for i in 0..<count { values[i] = ~linearValue(i, seed) }
+        guard let command = queue.makeCommandBuffer(),
+              let encoder = command.makeComputeCommandEncoder() else {
+            throw advancedFailure("linear-texture-encoder-unavailable")
+        }
+        encoder.setComputePipelineState(pipeline)
+        encoder.setTexture(texture, index: 0)
+        encoder.setBuffer(output, offset: 0, index: 0)
+        let group = max(1, min(pipeline.threadExecutionWidth, pipeline.maxTotalThreadsPerThreadgroup, count))
+        encoder.dispatchThreadgroups(MTLSize(width: (count + group - 1) / group, height: 1, depth: 1),
+                                     threadsPerThreadgroup: MTLSize(width: group, height: 1, depth: 1))
+        encoder.endEncoding()
+        let timing = try completedTiming(command, "linear-texture-timeout iteration=\(iteration + 1)")
+        for i in 0..<count {
+            guard values[i] == linearValue(i, seed) else {
+                throw advancedFailure("linear-texture-mismatch index=\(i) iteration=\(iteration + 1)")
+            }
+        }
+        samples.append(timing)
+    }
+    return samples
+}
+
+// A constant RGBA8 image must survive filtering exactly at every mip level.
+// Distinct iteration colors and poisoned readback prevent stale-result passes.
+// One upload, mip generation and all copies are ordered on a single blit encoder.
+func mipColor(_ iteration: Int) -> [UInt8] {
+    [UInt8(truncatingIfNeeded: iteration), UInt8(truncatingIfNeeded: iteration >> 8), 173, 255]
+}
+func probeMipmaps(_ device: MTLDevice, iterations: Int) throws -> [Timing] {
+    let side = 8, rowBytes = 256, levelBytes = 2048, levels = 4
+    let desc = MTLTextureDescriptor.texture2DDescriptor(
+        pixelFormat: .rgba8Unorm, width: side, height: side, mipmapped: true)
+    desc.storageMode = .private
+    desc.usage = .shaderRead
+    guard let texture = device.makeTexture(descriptor: desc), texture.mipmapLevelCount == levels,
+          let upload = device.makeBuffer(length: levelBytes, options: .storageModeShared),
+          let readback = device.makeBuffer(length: levelBytes * levels, options: .storageModeShared),
+          let queue = device.makeCommandQueue() else {
+        throw advancedFailure("mipmap-resource-unavailable")
+    }
+    let input = upload.contents().bindMemory(to: UInt8.self, capacity: levelBytes)
+    let output = readback.contents().bindMemory(to: UInt8.self, capacity: levelBytes * levels)
+    var samples = [Timing]()
+    for iteration in 0..<iterations {
+        let color = mipColor(iteration)
+        for y in 0..<side {
+            for x in 0..<side {
+                for channel in 0..<4 { input[y * rowBytes + x * 4 + channel] = color[channel] }
+            }
+        }
+        for i in 0..<(levelBytes * levels) { output[i] = 0x5c }
+        guard let command = queue.makeCommandBuffer(),
+              let blit = command.makeBlitCommandEncoder() else {
+            throw advancedFailure("mipmap-blit-unavailable")
+        }
+        let origin = MTLOrigin(x: 0, y: 0, z: 0)
+        blit.copy(from: upload, sourceOffset: 0, sourceBytesPerRow: rowBytes,
+                  sourceBytesPerImage: levelBytes,
+                  sourceSize: MTLSize(width: side, height: side, depth: 1),
+                  to: texture, destinationSlice: 0, destinationLevel: 0, destinationOrigin: origin)
+        blit.generateMipmaps(for: texture)
+        for level in 0..<levels {
+            let size = side >> level
+            blit.copy(from: texture, sourceSlice: 0, sourceLevel: level,
+                      sourceOrigin: origin, sourceSize: MTLSize(width: size, height: size, depth: 1),
+                      to: readback, destinationOffset: level * levelBytes,
+                      destinationBytesPerRow: rowBytes, destinationBytesPerImage: levelBytes)
+        }
+        blit.endEncoding()
+        let timing = try completedTiming(command, "mipmap-timeout iteration=\(iteration + 1)")
+        for level in 0..<levels {
+            let size = side >> level
+            for y in 0..<size {
+                for x in 0..<size {
+                    for channel in 0..<4 {
+                        let offset = level * levelBytes + y * rowBytes + x * 4 + channel
+                        guard output[offset] == color[channel] else {
+                            throw advancedFailure("mipmap-mismatch level=\(level) x=\(x) y=\(y) channel=\(channel) iteration=\(iteration + 1)")
+                        }
+                    }
+                }
+            }
+        }
+        samples.append(timing)
+    }
+    return samples
+}
+
 let args = Array(CommandLine.arguments.dropFirst())
 if args == ["--self-test"] {
     let a = summarize([3, 1, 2, 4])
@@ -205,15 +347,22 @@ if args == ["--self-test"] {
     guard a.min == 1 && a.median == 2.5 && a.p95 == 4 && a.max == 4 &&
           b.min == 7 && b.median == 7 && b.p95 == 7 && b.max == 7 &&
           c.median == 50.5 && c.p95 == 95 else { exit(1) }
-    print("PASS host-only timing statistics")
+    guard linearValue(0, 0) == 0x12345678,
+          linearValue(1, 0) == 0x1235547b,
+          linearValue(0, 1) == 0x12345679,
+          mipColor(0) == [0, 0, 173, 255],
+          mipColor(256) == [0, 1, 173, 255],
+          mipColor(999) == [231, 3, 173, 255] else { exit(1) }
+    print("PASS host-only timing statistics and advanced expected-value fixtures")
     exit(0)
 }
 func usage() -> Never {
-    fputs("Usage: metal_probe [--registry-id decimal-or-0xhex] [--iterations 1...1000]\n", stderr)
+    fputs("Usage: metal_probe [--registry-id decimal-or-0xhex] [--iterations 1...1000] [--suite standard|advanced]\n", stderr)
     exit(2)
 }
 var requested: UInt64? = nil
 var iterations = 1
+var advanced = false
 var seen = Set<String>()
 var index = 0
 while index < args.count {
@@ -227,6 +376,9 @@ while index < args.count {
     case "--iterations":
         guard let n = Int(value), (1...1000).contains(n) else { usage() }
         iterations = n
+    case "--suite":
+        guard value == "standard" || value == "advanced" else { usage() }
+        advanced = value == "advanced"
     default: usage()
     }
     index += 2
@@ -260,6 +412,22 @@ for device in selected {
     } catch {
         failures += 1
         print("FAIL registry-id=0x\(id) stage=render \(error.localizedDescription)")
+        if advanced { continue }
+    }
+    if advanced {
+        // A timed-out command may still be running: stop this device's suite
+        // on a failure rather than enqueue additional advanced GPU work.
+        do {
+            let samples = try probeLinearTexture(device, iterations: iterations)
+            print("PASS registry-id=0x\(id) linear-texture-output-verified iterations=\(iterations)")
+            report("linear-texture", id, samples)
+            let mipSamples = try probeMipmaps(device, iterations: iterations)
+            print("PASS registry-id=0x\(id) mipmap-pixels-verified levels=4 iterations=\(iterations)")
+            report("mipmap", id, mipSamples)
+        } catch {
+            failures += 1
+            print("FAIL registry-id=0x\(id) stage=advanced \(error.localizedDescription)")
+        }
     }
 }
 exit(failures == 0 ? 0 : 1)

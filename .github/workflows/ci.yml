@@ -61,6 +61,14 @@ jobs:
           status=0
           "$probe" --iterations 1 --iterations 2 || status=$?
           test "$status" -eq 2
+          for suite in invalid "" Metal3; do
+            status=0
+            "$probe" --suite "$suite" || status=$?
+            test "$status" -eq 2
+          done
+          status=0
+          "$probe" --suite advanced --suite standard || status=$?
+          test "$status" -eq 2
       - name: Build DEBUG
         run: python3 tools/build.py --output build/DEBUG
       - name: Build RELEASE

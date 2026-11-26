@@ -195,6 +195,24 @@ against unseen wrap or reset. Seven host-only test methods exercise the
 actual decoder and bounded CLI. No new DC policy, DMC firmware or live
 counter collection is enabled. Hardware power savings are not established.
 
+### E5.8 advanced Metal resource validation
+
+The existing `tools/metal_probe.swift` keeps its standard compute/render
+workload by default. On a suitable physical GPU, `metal_probe --suite advanced
+--iterations 10` also checks a buffer-backed R32Uint texture: CPU writes to
+aligned shared backing storage are read by a compute shader and verified
+after command completion. A separate private RGBA8 texture is uploaded,
+mipmaps generated, and all four levels read back and checked against a
+constant per-iteration color. Both stages use bounded command completion
+waits and changing patterns; allocation, compilation, timeout or output
+failure is reported, not silently treated as a pass. Unsupported texture
+configurations may fail the opt-in suite; no support claim is inferred.
+The tests cover CPU-to-GPU alias visibility and ordered blit operations,
+not all resource synchronization scenarios, presentation, or Metal 3
+compliance. CI compiles the Swift program and exercises host-only expected
+values, timing and invalid/duplicate CLI arguments. MSL runtime compilation,
+GPU execution and resource compatibility remain deferred to real hardware.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched
