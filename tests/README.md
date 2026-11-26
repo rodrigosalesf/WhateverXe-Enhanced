@@ -84,8 +84,14 @@ hardware playback test.
 
 On macOS run `python3 tools/hdmi_audio_probe.py` for a read-only JSON snapshot.
 It reports selected properties and counts rather than raw EDID, device names,
-serials or machine identifiers. Missing properties or classes are not proof
-that audio is unsupported. The investigation is informed by
+serials or machine identifiers. The snapshot includes PCI audio-class candidate
+counts and compares `hda-gfx` values on `AppleIntelFramebuffer`,
+`AppleHDAController` and `AppleGFXHDA` services. The values themselves are
+never emitted. A shared value is only evidence that candidate properties match;
+it does not establish IORegistry provider ownership, HDA codec response,
+AppleGFXHDA attachment, or playback. This collector does not read live ELD,
+inspect HDA verbs or interrupts, or change device state. Missing properties or
+classes are not proof that audio is unsupported. The investigation is informed by
 [jkbuha's contribution](https://github.com/b00t0x/WhateverXe/issues/150)
 and [initial findings](https://github.com/b00t0x/WhateverXe/issues/124).
 No codec wake, donor hooks or kernel changes are included.

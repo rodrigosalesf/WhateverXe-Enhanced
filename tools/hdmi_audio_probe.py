@@ -10,7 +10,7 @@ from xml.parsers.expat import ExpatError
 
 CLASSES = ("AppleIntelFramebuffer", "AppleDisplay", "IODisplayConnect",
            "AppleHDAController", "IOHDACodecDevice", "AppleGFXHDA",
-           "IOAudioEngine")
+           "IOAudioEngine", "IOPCIDevice")
 HEADER = bytes.fromhex("00ffffffffffff00")
 
 
@@ -158,6 +158,39 @@ def plist_nodes(value):
     return [summarize_node(n) for n in value]
 
 
+def hda_gfx_value(node):
+    """Return a bounded comparison-only hda-gfx token; never include it in JSON."""
+    value = node.get("hda-gfx")
+    if isinstance(value, bytes):
+        if not 0 < len(value) <= 128:
+            return None
+        try:
+            value = value.decode("ascii")
+        except UnicodeDecodeError:
+            return None
+    if (not isinstance(value, str) or not value or len(value) > 128
+            or not value.isprintable()):
+        return None
+    return value
+
+
+def hda_gfx_association(gpu_values, audio_values):
+    """Compare candidate service properties without publishing their values."""
+    gpu = set(gpu_values)
+    audio = set(audio_values)
+    if not gpu and not audio:
+        status = "not-observed"
+    elif not gpu or not audio:
+        status = "incomplete"
+    elif gpu & audio:
+        status = "shared-value-observed"
+    else:
+        status = "different-values-observed"
+    return {"status": status, "gpu_candidates": len(gpu),
+            "audio_candidates": len(audio),
+            "limitations": "Compares only hda-gfx values on selected service classes; it does not prove provider ownership or AppleGFXHDA attachment."}
+
+
 def command(args, timeout=15):
     try:
         p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -172,10 +205,21 @@ def registry_class(cls, run=command):
     if raw is None:
         return {"status": "unavailable"}
     try:
-        nodes = plist_nodes(plistlib.loads(raw))
+        decoded = plistlib.loads(raw)
+        nodes = plist_nodes(decoded)
     except (ValueError, TypeError, OverflowError, plistlib.InvalidFileException, ExpatError):
         return {"status": "invalid-response"}
-    return {"status": "observed", "count": len(nodes), "nodes": nodes}
+    result = {"status": "observed", "count": len(nodes), "nodes": nodes}
+    result["_hda_gfx_values"] = [token for node in decoded
+                                  if (token := hda_gfx_value(node)) is not None]
+    if cls == "IOPCIDevice":
+        result["pci_audio_class_candidates"] = sum(
+            1 for node in decoded
+            if (code := numeric_property(node.get("class-code"))) is not None
+            and ((code >> 16) & 0xffff == 0x0403
+                 or (code >> 8) & 0xffff == 0x0403))
+        result["nodes"] = []  # PCI enumeration is summarized; device inventory is not emitted.
+    return result
 
 
 def audio_output_summary(value):
@@ -208,8 +252,17 @@ def audio_output_summary(value):
 
 
 def collect(run=command):
-    report = {"schema": 1, "macos": platform.mac_ver()[0],
-              "registry": {cls: registry_class(cls, run) for cls in CLASSES}}
+    registry = {cls: registry_class(cls, run) for cls in CLASSES}
+    gpu_values = []
+    for cls in ("AppleIntelFramebuffer",):
+        gpu_values.extend(registry[cls].pop("_hda_gfx_values", []))
+    audio_values = []
+    for cls in ("AppleHDAController", "AppleGFXHDA"):
+        audio_values.extend(registry[cls].pop("_hda_gfx_values", []))
+    for result in registry.values():
+        result.pop("_hda_gfx_values", None)
+    report = {"schema": 1, "macos": platform.mac_ver()[0], "registry": registry,
+              "hda_gfx_association": hda_gfx_association(gpu_values, audio_values)}
     raw = run(["/usr/sbin/system_profiler", "SPAudioDataType", "-json"], 30)
     try:
         report["audio_outputs"] = audio_output_summary(json.loads(raw)) if raw is not None else {"status": "unavailable"}

@@ -75,8 +75,15 @@ class ProbeTests(unittest.TestCase):
         registry = plistlib.dumps([{"IODisplayEDID": base(1) + cta(flags=0x40),
                                    "vendor-id": b"\x86\x80\x00\x00",
                                    "device-id": b"\xa3\x46\x00\x00",
+                                   "hda-gfx": "private-route-token",
                                    "IORegistryEntryName": "private-display",
                                    "serial-number": "private-serial"}])
+        gpu_registry = plistlib.dumps([{"hda-gfx": "private-route-token"}])
+        audio_registry = plistlib.dumps([{"hda-gfx": "private-route-token"}])
+        pci_registry = plistlib.dumps([{"class-code": 0x04030000,
+                                        "vendor-id": 0x8086,
+                                        "device-id": 0x51c8,
+                                        "IORegistryEntryName": "private-pci-path"}])
         audio = json.dumps({"SPAudioDataType": [{"_items": [
             {"_name": "private-monitor", "coreaudio_device_output": 2,
              "coreaudio_device_transport": "HDMI"},
@@ -85,7 +92,10 @@ class ProbeTests(unittest.TestCase):
         def run(args, timeout=15):
             calls.append(args)
             if args[0] == "/usr/sbin/ioreg":
-                return registry if args[-1] == "AppleDisplay" else plistlib.dumps([])
+                return {"AppleDisplay": registry,
+                        "AppleIntelFramebuffer": gpu_registry,
+                        "AppleHDAController": audio_registry,
+                        "IOPCIDevice": pci_registry}.get(args[-1], plistlib.dumps([]))
             self.assertEqual(args, ["/usr/sbin/system_profiler", "SPAudioDataType", "-json"])
             return audio
         report = probe.collect(run)
@@ -95,8 +105,23 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(node["device-id"], "0x46a3")
         self.assertTrue(node["edid_audio"]["advertises_audio"])
         self.assertEqual(report["audio_outputs"]["transport_counts"], {"HDMI": 1})
+        self.assertEqual(report["hda_gfx_association"]["status"], "shared-value-observed")
+        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_audio_class_candidates"], 1)
+        self.assertEqual(report["registry"]["IOPCIDevice"]["nodes"], [])
         self.assertNotIn("private-", json.dumps(report))
+        self.assertNotIn("private-route-token", json.dumps(report))
         self.assertNotIn("IODisplayEDID", json.dumps(report))
+
+    def test_hda_gfx_comparison_is_cautious_and_redacted(self):
+        for gpu, audio, expected in ((["shared-token"], ["shared-token"], "shared-value-observed"),
+                                     (["gpu-a"], ["audio-b"], "different-values-observed"),
+                                     (["gpu-a"], [], "incomplete"),
+                                     ([], [], "not-observed")):
+            result = probe.hda_gfx_association(gpu, audio)
+            self.assertEqual(result["status"], expected)
+            self.assertNotIn("shared-token", json.dumps(result))
+            self.assertNotIn("gpu-a", json.dumps(result))
+            self.assertNotIn("audio-b", json.dumps(result))
 
     def test_unavailable_is_not_zero(self):
         report = probe.collect(lambda args, timeout=15: None)
