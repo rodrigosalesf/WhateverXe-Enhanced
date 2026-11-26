@@ -111,6 +111,23 @@ Investigate the HDMI video-without-audio report before changing kernel behavior.
 
 Acceptance criteria on the affected hardware: an HDMI audio output is detected and selectable in macOS, actual stereo playback reaches the HDMI display/receiver while video remains stable, reconnect and sleep/wake behavior are tested, and internal audio and existing Metal/display functionality do not regress. Record results and limitations separately. No HDMI-audio fix or hardware qualification is claimed yet.
 
+### E5 expanded scope: diagnostics, performance and safe deployment
+
+HDMI audio remains the first priority. The following planned work extends the E5 telemetry, power and validation modules; it does not imply that these features are already implemented.
+
+| Workstream | Planned scope | Acceptance criteria |
+| --- | --- | --- |
+| E5.4–E5.6 — GPU telemetry and power | Validate actual/requested GPU clocks and supported hardware limits, counter integrity and memory accounting; investigate RPS, ForceWake and RC6 with low-overhead, read-only measurements first. | Distinguish invalid or unavailable samples from zero; correlate with controlled GPU workloads; no unsafe polling, forced clock floor or power-policy changes without target-specific evidence. |
+| E5.8 — Advanced Metal validation | Extend the existing compute/render probe with supported buffer-backed textures, mipmaps, shared-memory coherence, texture synchronization and representative image workloads. | Verify outputs, resource lifetimes and timeouts on the target GPU; unsupported APIs are reported separately; retain E4 regression coverage. |
+| E5.9 — Frame pacing diagnostics | Measure presentation intervals, long frame gaps and, where exposed, VBlank timing; investigate CPU/GPU synchronization bottlenecks. | Reproducible E4/E5 comparison under equivalent display and workload settings; distinguish presentation metrics from offscreen command-buffer times. |
+| E5.10 — GPU memory intelligence | Investigate per-client memory and queue/context accounting using validated ownership and supported counters. | Detect inconsistent or stale samples; avoid claiming per-process VRAM totals where the driver does not expose reliable data; no private identifiers in shared reports. |
+| E5.11 — GPU flight recorder | Explore an optional, bounded event history for MMIO failures, ForceWake, timeouts, framebuffer transitions and recovery. | No unbounded buffers, interrupt-context file I/O or continuous disk synchronization; export diagnostics through a separate tool where feasible; verify disabled-path overhead and failure handling. |
+| E5.12 — Safe installation and ABI validation | Plan a read-only preflight, EFI backup/rollback guidance, executable identity and Mach-O symbol/OS compatibility checks, and a recovery boot procedure. | Explicit compatibility checks, preserved AMFIAnchor trust model and bootable fallback; no silent EFI or security-setting changes. |
+
+The [MeowXE3 findings](https://github.com/cuadra8998/MeowXE3/blob/main/docs/FINDINGS.md), [development notes](https://github.com/cuadra8998/MeowXE3/blob/main/docs/CONTINUING.md) and [regression tests](https://github.com/cuadra8998/MeowXE3/tree/main/tools/tests) are complementary research references. They describe a different Xe3/Linux-driver architecture, not a drop-in dependency or a demonstrated HDMI-audio fix. Their reported performance results are not Enhanced benchmarks. Preserve the existing Xe-LP driver architecture, AMFIAnchor security model and BSD-3-Clause licensing; independently implement ideas and review per-file license compatibility and attribution before incorporating any third-party code. Do not import Xe3 firmware, alternate accelerators, a fixed minimum clock or AMFI-disabling settings.
+
+E6 remains focused on real hardware video decode/encode validation; E7 on OS-specific compatibility; E8 on hardware-specific improvements. Native Vulkan/Metal translation is outside the current scope and may be evaluated separately as exploratory research, not promised support.
+
 ### Community testing
 
 If you have tested Enhanced, please [open an Issue](https://github.com/rodrigosalesf/WhateverXe-Enhanced/issues/new) with the release/tag, CPU, GPU PCI ID, macOS build, Graphics package version, display configuration, Metal Probe output and observed problems. Remove serial numbers, UUIDs associated with the machine, personal identifiers and other private data before attaching logs. Downloads do not prove successful installations; voluntary reports help establish real compatibility.
