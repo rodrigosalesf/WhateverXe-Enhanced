@@ -14,6 +14,71 @@ CLASSES = ("AppleIntelFramebuffer", "AppleDisplay", "IODisplayConnect",
 HEADER = bytes.fromhex("00ffffffffffff00")
 
 
+PCM_RATES = (32000, 44100, 48000, 88200, 96000, 176400, 192000)
+
+
+def stereo_pcm16_rates(sads):
+    """Rates explicitly advertised in a single LPCM SAD with >=2 channels."""
+    rates = set()
+    for sad in sads:
+        if len(sad) != 3:
+            continue
+        a, b, c = sad
+        # Reserved bits, missing rates/depth and non-LPCM are not positive evidence.
+        if a & 0x80 or (a >> 3) != 1 or (a & 7) < 1:
+            continue
+        if b & 0x80 or c & 0xf8 or not (c & 1):
+            continue
+        rates.update(rate for i, rate in enumerate(PCM_RATES) if b & (1 << i))
+    return sorted(rates)
+
+
+def eld_audio(data):
+    """Read a version-2 ELD baseline; no hardware access and no raw identity output.
+
+    Layout reference: Linux v6.12 include/drm/drm_eld.h (MIT).
+    The 4-byte header is excluded from the dword baseline length.
+    Vendor-specific bytes after the baseline are not interpreted.
+    """
+    def invalid(reason):
+        return {"status": "invalid", "reason": reason}
+    if not isinstance(data, bytes) or len(data) < 4:
+        return invalid("header-length")
+    if data[0] >> 3 != 2:
+        return {"status": "unsupported", "reason": "eld-version"}
+    end = 4 + data[2] * 4
+    if end < 20 or end > len(data):
+        return invalid("baseline-length")
+    name_length = data[4] & 31
+    count = data[5] >> 4
+    connection = (data[5] >> 2) & 3
+    if name_length > 16:
+        return invalid("monitor-name-length")
+    if connection not in (0, 1):
+        return {"status": "unsupported", "reason": "connection-type"}
+    start = 20 + name_length
+    if start + 3 * count > end:
+        return invalid("sad-overrun")
+    sads = [data[p:p + 3] for p in range(start, start + 3 * count, 3)]
+    return {"status": "valid", "version": 2, "baseline_bytes": end,
+            "connection": ("HDMI", "DisplayPort")[connection],
+            "short_audio_descriptors": count,
+            "speaker_allocation_mask": data[7] & 0x7f,
+            "stereo_pcm16_rates_hz": stereo_pcm16_rates(sads)}
+
+
+def compare_audio_evidence(edid, eld):
+    """Compare explicit capabilities only; inputs need not describe the same sink."""
+    if edid.get("status") != "valid" or eld.get("status") != "valid":
+        return {"status": "unavailable"}
+    a = set(edid["stereo_pcm16_rates_hz"])
+    b = set(eld["stereo_pcm16_rates_hz"])
+    return {"status": "compared", "common_stereo_pcm16_rates_hz": sorted(a & b),
+            "edid_only_rates_hz": sorted(a - b),
+            "eld_only_rates_hz": sorted(b - a),
+            "limitations": "Explicit LPCM SAD evidence only; no physical sink association or playback proof."}
+
+
 def edid_audio(data):
     """Summarize validated CTA audio evidence, not ELD or live playback."""
     def invalid(reason):
@@ -27,6 +92,7 @@ def edid_audio(data):
         return invalid("extension-count")
     basic = False
     sad_count = cta_count = 0
+    sads = []
     hdmi_vendor = False
     for offset in range(128, len(data), 128):
         block = data[offset:offset + 128]
@@ -52,12 +118,14 @@ def edid_audio(data):
                 if length == 0 or length % 3:
                     return invalid("audio-block-length")
                 sad_count += length // 3
+                sads.extend(payload[p:p + 3] for p in range(0, length, 3))
             elif tag == 3 and length >= 3:
                 hdmi_vendor |= payload[:3] in (b"\x03\x0c\x00", b"\xd8\x5d\xc4")
             pos += length
     return {"status": "valid", "extensions": count, "cta_extensions": cta_count,
             "basic_audio": basic, "short_audio_descriptors": sad_count,
             "hdmi_vendor_block": hdmi_vendor,
+            "stereo_pcm16_rates_hz": stereo_pcm16_rates(sads),
             "advertises_audio": basic or sad_count > 0}
 
 
@@ -155,7 +223,29 @@ def collect(run=command):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args()
+    parser.add_argument("--eld-file", help="offline binary ELD snapshot (no device access)")
+    parser.add_argument("--edid-file", help="optional offline binary EDID snapshot to compare")
+    args = parser.parse_args()
+    if args.edid_file and not args.eld_file:
+        parser.error("--edid-file requires --eld-file")
+    if args.eld_file:
+        def read_bounded(path, limit):
+            with open(path, "rb") as f:
+                data = f.read(limit + 1)
+            if len(data) > limit:
+                raise ValueError("input exceeds diagnostic size limit")
+            return data
+        try:
+            eld = eld_audio(read_bounded(args.eld_file, 4096))
+            report = {"schema": 1, "eld": eld}
+            if args.edid_file:
+                edid = edid_audio(read_bounded(args.edid_file, 256 * 128))
+                report["edid"] = edid
+                report["comparison"] = compare_audio_evidence(edid, eld)
+        except (OSError, ValueError):
+            parser.exit(2, "Unable to read bounded binary input.\\n")
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0 if eld["status"] == "valid" and report.get("edid", {"status": "valid"})["status"] == "valid" else 1
     if sys.platform != "darwin":
         parser.exit(2, "This diagnostic requires macOS.\n")
     print(json.dumps(collect(), indent=2, sort_keys=True))
