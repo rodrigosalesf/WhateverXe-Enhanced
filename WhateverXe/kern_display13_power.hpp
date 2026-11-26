@@ -14,8 +14,13 @@ namespace Display13Power {
 template<class Read,class Write> bool restoreGGTT(Read read,Write write) {
     constexpr uint32_t reg=0x42084,bit=1U<<30;
     const auto before=read(reg);if(before==UINT32_MAX)return false;
-    if(!(before&bit))write(reg,before|bit);
-    return read(reg)==(before|bit);
+    const auto expected=before|bit;
+    // All-ones is an inaccessible-register sentinel, not a valid posting
+    // certificate. Never issue a write that cannot be verified unambiguously.
+    if(expected==UINT32_MAX)return false;
+    if(before!=expected)write(reg,expected);
+    const auto after=read(reg);
+    return after!=UINT32_MAX && after==expected;
 }
 enum class Domain : uint32_t { PW1, PW2, PipeA, PipeB, PipeC, DDIB, AUXB, DDIA, AUXA, DDIC, AUXC, DDITC1, AUXTC1, DDITC2, AUXTC2, DDITC3, AUXTC3, DDITC4, AUXTC4, Count };
 constexpr unsigned Count = static_cast<unsigned>(Domain::Count);
