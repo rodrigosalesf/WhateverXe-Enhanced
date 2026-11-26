@@ -233,6 +233,31 @@ dropped-frame counts or performance gains are claimed. VBlank cadence is not
 application FPS; Metal command-buffer timing must not be used as presentation
 timing. Raw timestamps and unrelated metadata are not exported.
 
+### E5.10 GPU memory ownership accounting
+
+Run `python3 tools/test.py --only gpu_memory_probe --require gpu_memory_probe`.
+The offline tool `python3 tools/gpu_memory_probe.py snapshot.json` uses
+the normalized diagnostic schema `wex-memory-accounting-v1`, not an Apple
+driver ABI. Supply a single coherent snapshot with local integer IDs:
+clients [{id}], contexts [{id, client}], queues [{id, context, client}],
+and allocations [{id, bytes, queues}] (queues is a list of queue IDs).
+A queue is resolved only when its declared client agrees with its context
+and the client is present. Each allocation is counted once; multiple queues
+of one resolved client are grouped, multi-client allocations are shared,
+and any unresolved link leaves the allocation unattributed. Duplicate IDs
+and links, invalid schemas, excessive input and aggregate overflow fail
+closed. Invalid byte sizes are counted separately. Client IDs are replaced
+by local ordinals in the report; these are not stable across captures.
+
+Nine host-only tests exercise the actual accounting and CLI, including
+conflicts, missing links, shared allocations, bounds and redaction. These
+are synthetic allocation graphs, not live IORegistry ownership evidence.
+Observed bytes do not establish physical residency, GART usage or complete
+per-process VRAM; shared bytes are not duplicated in exclusive totals.
+No live queue collector, memory allocation policy, eviction or kernel
+changes are included. Existing queue-trace and memory-layout guards remain
+unchanged; native ownership/lifetime validation is still pending.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched
