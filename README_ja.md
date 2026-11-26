@@ -115,6 +115,21 @@ MIPI DSI対応は**試験的**で、検証したGPD MicroPC 2・CHUWI MiniBook X
 - Alder Lake-N / Twin LakeとAlder Lake-H/P/U / Raptor Lake-H/P/UでのDisplayPort・USB-C・内蔵画面対応の拡充。
 - 画面再接続の安定性改善とシステム全体のスリープ／復帰の対応範囲拡充。
 
+## Enhanced E5 開発計画（未実装）
+
+[英語版のEnhancedロードマップ](README.md#enhanced-roadmap)を参照してください。HDMI音声の認識・再生を最優先とし、既存のMetalと表示機能の回帰を防ぎます。
+
+- E5.4〜E5.6：GPUクロック、カウンター、メモリー管理、RPS、ForceWake、RC6を低負荷の読み取り専用計測から検証。
+- E5.8：Metalのバッファー共有テクスチャ、ミップマップ、メモリー整合性、同期および画像処理のテストを拡充。
+- E5.9：フレーム間隔とVBlankの計測、CPU/GPU同期の調査。
+- E5.10：クライアント別のメモリー・キュー・コンテキストの診断。
+- E5.11：容量を制限した任意のGPUイベント履歴。割り込み中のファイルI/Oや継続的なディスク同期は行わない。
+- E5.12：導入前の読み取り専用検査、EFIバックアップ・復旧、Mach-OシンボルとOS互換性の確認。
+
+[MeowXE3](https://github.com/cuadra8998/MeowXE3/blob/main/docs/FINDINGS.md)は診断と試験手法の参考資料です。異なるXe3ドライバー構成であり、直接導入するものではありません。既存のXe-LP構成、AMFIAnchor、BSD-3-Clauseライセンスを維持し、コードの取り込み前に個別のライセンスを確認します。固定GPUクロック、Xe3ファームウェア、AMFI無効化設定は移植しません。Vulkan/Metal変換は現時点の対象外です。
+
+E6は動画のハードウェアエンコード／デコード、E7はmacOS互換性、E8は機種固有の改善を予定しています。いずれも実機検証前の計画であり、対応を保証するものではありません。
+
 ## ビルドとテスト
 
 macOS、Xcode Command Line Tools、Python 3.9以上、MacKernelSDK、Lilu 1.7.2の開発用ヘッダー／ライブラリが必要です。`MacKernelSDK/`と`Lilu.kext/`をリポジトリ直下に置くか、`--sdk`・`--lilu`で指定します。
