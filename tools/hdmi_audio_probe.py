@@ -6,6 +6,7 @@ import plistlib
 import subprocess
 import sys
 import platform
+from xml.parsers.expat import ExpatError
 
 CLASSES = ("AppleIntelFramebuffer", "AppleDisplay", "IODisplayConnect",
            "AppleHDAController", "IOHDACodecDevice", "AppleGFXHDA",
@@ -104,7 +105,7 @@ def registry_class(cls, run=command):
         return {"status": "unavailable"}
     try:
         nodes = plist_nodes(plistlib.loads(raw))
-    except (ValueError, TypeError, OverflowError, plistlib.InvalidFileException):
+    except (ValueError, TypeError, OverflowError, plistlib.InvalidFileException, ExpatError):
         return {"status": "invalid-response"}
     return {"status": "observed", "count": len(nodes), "nodes": nodes}
 
