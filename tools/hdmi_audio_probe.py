@@ -177,22 +177,31 @@ def hda_gfx_value(node):
     return value
 
 
-def hda_gfx_association(gpu_values, audio_values, service_status):
+def hda_gfx_association(gpu_values, audio_values, service_status,
+                        gpu_property_count=None, audio_property_count=None):
     """Compare candidate service properties without publishing their values."""
     gpu = set(gpu_values)
     audio = set(audio_values)
+    gpu_property_count = (len(gpu_values) if gpu_property_count is None
+                          else gpu_property_count)
+    audio_property_count = (len(audio_values) if audio_property_count is None
+                            else audio_property_count)
+    unreadable = (gpu_property_count != len(gpu_values) or
+                  audio_property_count != len(audio_values))
     if any(status != "observed" for status in service_status.values()):
         status = "incomplete"
-    elif not gpu and not audio:
+    elif unreadable:
+        status = "incomplete"
+    elif not gpu_property_count and not audio_property_count:
         status = "not-observed"
-    elif not gpu or not audio:
+    elif not gpu_property_count or not audio_property_count:
         status = "incomplete"
     elif gpu & audio:
         status = "shared-value-observed"
     else:
         status = "different-values-observed"
-    return {"status": status, "gpu_candidates": len(gpu),
-            "audio_candidates": len(audio),
+    return {"status": status, "gpu_candidates": gpu_property_count,
+            "audio_candidates": audio_property_count,
             "service_status": service_status,
             "limitations": "Compares only hda-gfx values on selected service classes; it does not prove provider ownership or AppleGFXHDA attachment."}
 
@@ -218,6 +227,8 @@ def registry_class(cls, run=command):
     result = {"status": "observed", "count": len(nodes), "nodes": nodes}
     result["_hda_gfx_values"] = [token for node in decoded
                                   if (token := hda_gfx_value(node)) is not None]
+    result["_hda_gfx_property_count"] = sum(
+        "hda-gfx" in node for node in decoded)
     if cls == "IOPCIDevice":
         class_codes = [numeric_property(node.get("class-code")) for node in decoded]
         class_codes = [code for code in class_codes if code is not None]
@@ -283,11 +294,15 @@ def audio_output_summary(value):
 def collect(run=command):
     registry = {cls: registry_class(cls, run) for cls in CLASSES}
     gpu_values = []
+    gpu_property_count = 0
     for cls in ("AppleIntelFramebuffer",):
         gpu_values.extend(registry[cls].pop("_hda_gfx_values", []))
+        gpu_property_count += registry[cls].pop("_hda_gfx_property_count", 0)
     audio_values = []
+    audio_property_count = 0
     for cls in ("AppleHDAController", "AppleGFXHDA"):
         audio_values.extend(registry[cls].pop("_hda_gfx_values", []))
+        audio_property_count += registry[cls].pop("_hda_gfx_property_count", 0)
     for result in registry.values():
         result.pop("_hda_gfx_values", None)
     association_classes = {"AppleIntelFramebuffer": registry["AppleIntelFramebuffer"]["status"],
@@ -295,7 +310,8 @@ def collect(run=command):
                            "AppleGFXHDA": registry["AppleGFXHDA"]["status"]}
     report = {"schema": 1, "macos": platform.mac_ver()[0], "registry": registry,
               "hda_gfx_association": hda_gfx_association(
-                  gpu_values, audio_values, association_classes)}
+                  gpu_values, audio_values, association_classes,
+                  gpu_property_count, audio_property_count)}
     raw = run(["/usr/sbin/system_profiler", "SPAudioDataType", "-json"], 30)
     try:
         report["audio_outputs"] = audio_output_summary(json.loads(raw)) if raw is not None else {"status": "unavailable"}

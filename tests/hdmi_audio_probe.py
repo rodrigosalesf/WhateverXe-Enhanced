@@ -136,6 +136,26 @@ class ProbeTests(unittest.TestCase):
             [], [], {"gpu": "observed", "hda": "invalid-response"})
         self.assertEqual(unavailable["status"], "incomplete")
 
+    def test_unreadable_hda_gfx_property_is_incomplete_not_absent(self):
+        gpu_registry = plistlib.dumps([{"hda-gfx": 1234}])
+        audio_registry = plistlib.dumps([])
+        audio = json.dumps({"SPAudioDataType": []})
+
+        def run(args, timeout=15):
+            if args[0] == "/usr/sbin/ioreg":
+                return {"AppleIntelFramebuffer": gpu_registry,
+                        "AppleHDAController": audio_registry,
+                        "AppleGFXHDA": audio_registry}.get(args[-1], plistlib.dumps([]))
+            return audio
+
+        report = probe.collect(run)
+        association = report["hda_gfx_association"]
+        self.assertEqual(association["status"], "incomplete")
+        self.assertEqual(association["gpu_candidates"], 1)
+        self.assertEqual(association["audio_candidates"], 0)
+        self.assertTrue(report["registry"]["AppleIntelFramebuffer"]["nodes"][0]["hda-gfx-present"])
+        self.assertNotIn("1234", json.dumps(report))
+
     def test_pci_class_absence_is_reported_as_unavailable(self):
         registry = plistlib.dumps([{"vendor-id": 0x8086, "device-id": 0x46a3}])
         result = probe.registry_class(
