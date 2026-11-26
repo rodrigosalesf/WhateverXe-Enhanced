@@ -53,7 +53,11 @@ jobs:
           done
           build/quality-venv/bin/ruff check tests/xelp_flight_recorder_mutants.py
           mkdir -p build/quality-bin
-          GOBIN="$PWD/build/quality-bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
+          # Use the exact upstream Intel macOS release instead of assuming Go is installed.
+          archive=build/quality-bin/actionlint.tar.gz
+          curl --fail --location --silent --show-error --retry 3 --output "$archive" https://github.com/rhysd/actionlint/releases/download/v1.7.11/actionlint_1.7.11_darwin_amd64.tar.gz
+          printf '%s  %s\n' '17ffc17fed8f0258ef6ad4aed932d3272464c7ef7d64e1cb0d65aa97c9752107' "$archive" | shasum -a 256 -c -
+          tar -xzf "$archive" -C build/quality-bin actionlint
           build/quality-bin/actionlint -version
           build/quality-bin/actionlint -shellcheck= -pyflakes= .github/workflows/ci.yml
       - name: Quality Gate - C++ host analysis
