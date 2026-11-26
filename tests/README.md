@@ -285,6 +285,34 @@ No IRQ safety, concurrent writers, kernel dump persistence, live collection,
 or performance overhead measurement is demonstrated. No additional boot
 arguments or default driver behavior changes are introduced.
 
+### E5.12 read-only installation preflight
+
+Run `python3 tools/test.py --require install_preflight`.
+The offline tool `python3 tools/install_preflight.py config.plist --darwin 24.6.0`
+checks the standard post-install OpenCore configuration documented in the
+README and [AMFIAnchor OpenCore instructions](https://github.com/b00t0x/AMFIAnchor#install-with-opencore).
+The caller explicitly supplies the target Darwin version, within 20–25.
+Enabled canonical top-level kext names are filtered by architecture and
+inclusive kernel bounds. Report missing or duplicated required entries,
+Lilu/anchor/injector ordering, incompatible WhateverGreen coexistence,
+AMFIPass ordering and departures from the documented boot arguments and
+SIP setting. These are configuration findings, not proof of boot failure.
+Custom injectors, renamed bundles, installer profiles, NVRAM overrides and
+actual bundle versions/identities are not validated. No personal config
+fields, serial numbers, filenames or raw arguments are printed.
+
+An optional `--backup-config backup.plist` checks a separate readable
+configuration with the same policy; it rejects the same file (including
+aliases). It does not create or validate a full EFI backup or restore it.
+Exit 0 means no known findings in the supplied configuration(s), 1 means
+findings, 2 means invalid or unavailable input. Eight host-only tests
+exercise the actual parser and CLI. Input is bounded and no configuration
+or EFI files are written. Before installation, separately verify the full
+backup, matching OpenCore ocvalidate, bundle files, Lilu version, Graphics
+payload, hardware identity and DVMT. Existing build-time Compat ABI/export
+checks, x86_64 packaging and dSYM UUID checks remain mandatory and unchanged.
+No new native ABI support or hardware bootability is established.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched
