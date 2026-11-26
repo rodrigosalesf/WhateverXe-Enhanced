@@ -26,6 +26,171 @@ def snapshot():
 
 
 class MemoryTests(unittest.TestCase):
+    def test_registry_series_deltas_require_one_unambiguous_observation(self):
+        high = str(2**63 + 8)
+        report = probe.analyze_registry_series([
+            {"elapsed_ns": 0, "captured_at_utc": "2026-01-01T00:00:00+00:00",
+             "registry_text": '"inUseSysMemoryBytes"=100'},
+            {"elapsed_ns": 1_000_000_000, "captured_at_utc": "2026-01-01T00:00:01+00:00",
+             "registry_text": '"inUseSysMemoryBytes"=125'},
+            {"elapsed_ns": 2_000_000_000, "captured_at_utc": "2026-01-01T00:00:02+00:00",
+             "registry_text": '"inUseSysMemoryBytes"=' + high},
+            {"elapsed_ns": 3_000_000_000, "captured_at_utc": "2026-01-01T00:00:03+00:00",
+             "registry_text": '"inUseSysMemoryBytes"=125'},
+            {"elapsed_ns": 4_000_000_000, "captured_at_utc": "2026-01-01T00:00:04+00:00",
+             "registry_text": '"inUseSysMemoryBytes"=125\n"inUseSysMemoryBytes"=125'},
+            {"elapsed_ns": 5_000_000_000, "captured_at_utc": "2026-01-01T00:00:05+00:00",
+             "registry_text": '"inUseVidMemoryBytes"=7'},
+        ])
+        samples = report["samples"]
+        self.assertEqual(report["schema"], "wex-memory-registry-series-v1")
+        self.assertEqual(samples[1]["counters"]["inUseSysMemoryBytes"]["delta_from_previous"],
+                         {"status": "computed", "bytes": 25, "elapsed_ns": 1_000_000_000})
+        self.assertEqual(samples[2]["counters"]["inUseSysMemoryBytes"]["delta_from_previous"]["status"],
+                         "suspicious-value")
+        self.assertEqual(samples[4]["counters"]["inUseSysMemoryBytes"]["delta_from_previous"]["status"],
+                         "ambiguous-observation")
+        self.assertEqual(samples[5]["counters"]["inUseSysMemoryBytes"]["delta_from_previous"]["status"],
+                         "missing-observation")
+        self.assertNotIn("registry_text", json.dumps(report))
+
+    def test_series_consumes_snapshots_before_requesting_the_next(self):
+        # A producer may reuse its record after the consumer requests more data.
+        def captures():
+            row = {"elapsed_ns": 0, "captured_at_utc": "2026-01-01T00:00:00+00:00",
+                   "registry_text": '"inUseSysMemoryBytes"=12'}
+            yield row
+            row.update(elapsed_ns=1, registry_text='"inUseSysMemoryBytes"=16')
+            yield row
+
+        report = probe.analyze_registry_series(captures())
+        counter = report["samples"][1]["counters"]["inUseSysMemoryBytes"]
+        self.assertEqual(counter["delta_from_previous"]["bytes"], 4)
+
+    def test_registry_series_rejects_nonmonotonic_and_malformed_samples(self):
+        valid = {"elapsed_ns": 0, "captured_at_utc": "2026-01-01T00:00:00+00:00",
+                 "registry_text": '"inUseSysMemoryBytes"=100'}
+        for samples in ([valid, {**valid, "elapsed_ns": 0}],
+                        [{**valid, "captured_at_utc": "not-a-time"}],
+                        [{**valid, "elapsed_ns": True}],
+                        [{**valid, "unexpected": "field"}]):
+            with self.subTest(samples=samples), self.assertRaises(ValueError):
+                probe.analyze_registry_series(samples)
+
+    def test_temporal_collector_uses_read_only_ioreg_and_keeps_failures_as_gaps(self):
+        class Clock:
+            elapsed = 0
+
+            def monotonic_ns(self):
+                return self.elapsed
+
+            def sleep(self, seconds):
+                self.elapsed += int(seconds * 1_000_000_000)
+
+        clock = Clock()
+        calls = []
+
+        class Result:
+            stdout = '"inUseSysMemoryBytes"=100'
+
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            if len(calls) == 2:
+                raise OSError("fixture failure")
+            return Result()
+
+        timestamps = iter(("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:01+00:00",
+                           "2026-01-01T00:00:02+00:00"))
+        result = probe.collect_registry_series(3, 1, run_capture=run, sleep=clock.sleep,
+                                               monotonic_ns=clock.monotonic_ns,
+                                               utc_now=lambda: next(timestamps))
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[0][0], ["/usr/sbin/ioreg", "-r", "-c", "IOAccelerator", "-d", "1", "-l", "-w0"])
+        self.assertTrue(calls[0][1]["check"])
+        self.assertEqual([sample["capture_status"] for sample in result["samples"]],
+                         ["ok", "capture-failed", "ok"])
+        self.assertIsNone(result["samples"][1]["counters"])
+        self.assertEqual([sample["elapsed_ns"] for sample in result["samples"]],
+                         [0, 1_000_000_000, 2_000_000_000])
+
+    def test_collection_budget_limits_timeouts_and_stops_at_deadline(self):
+        elapsed = 0
+        timeouts = []
+
+        def sleep(seconds):
+            nonlocal elapsed
+            elapsed += round(seconds * 1_000_000_000)
+
+        def run(command, **kwargs):
+            timeout = kwargs["timeout"]
+            timeouts.append(timeout)
+            sleep(timeout)
+            raise subprocess.TimeoutExpired(command, timeout)
+
+        report = probe.collect_registry_series(
+            17, 1, run_capture=run, sleep=sleep, monotonic_ns=lambda: elapsed,
+            utc_now=lambda: "2026-01-01T00:00:00+00:00")
+        self.assertEqual(timeouts, [15, 2])
+        self.assertEqual([x["elapsed_ns"] for x in report["samples"]],
+                         [15_000_000_000, 17_000_000_000])
+        self.assertTrue(all(x["capture_status"] == "capture-failed"
+                            for x in report["samples"]))
+
+    def test_collection_does_not_start_at_exact_deadline(self):
+        elapsed = 0
+        calls = []
+
+        def sleep(seconds):
+            nonlocal elapsed
+            elapsed += round(seconds * 1_000_000_000)
+
+        def run(command, **kwargs):
+            calls.append(kwargs["timeout"])
+            return subprocess.CompletedProcess(command, 0, '"inUseSysMemoryBytes"=1')
+
+        report = probe.collect_registry_series(
+            2, 1, run_capture=run, sleep=sleep, monotonic_ns=lambda: elapsed,
+            utc_now=lambda: "2026-01-01T00:00:00+00:00")
+        self.assertEqual(calls, [2, 1])
+        self.assertEqual([x["elapsed_ns"] for x in report["samples"]],
+                         [0, 1_000_000_000])
+
+    def test_collection_late_result_is_gap_and_no_further_capture(self):
+        elapsed = 0
+        calls = []
+
+        def run(command, **kwargs):
+            nonlocal elapsed
+            calls.append(kwargs["timeout"])
+            elapsed = 2_500_000_000
+            return subprocess.CompletedProcess(command, 0, '"inUseSysMemoryBytes"=1')
+
+        report = probe.collect_registry_series(
+            2, 1, run_capture=run, monotonic_ns=lambda: elapsed,
+            utc_now=lambda: "2026-01-01T00:00:00+00:00")
+        self.assertEqual(calls, [2])
+        self.assertEqual(report["samples"][0]["elapsed_ns"], 2_500_000_000)
+        self.assertEqual(report["samples"][0]["capture_status"], "capture-failed")
+        self.assertIsNone(report["samples"][0]["counters"])
+
+    def test_collection_checks_deadline_again_after_sleep(self):
+        elapsed = 0
+        calls = []
+
+        def sleep(seconds):
+            nonlocal elapsed
+            elapsed = 2_100_000_000
+
+        def run(command, **kwargs):
+            calls.append(kwargs["timeout"])
+            return subprocess.CompletedProcess(command, 0, '"inUseSysMemoryBytes"=1')
+
+        report = probe.collect_registry_series(
+            2, 1, run_capture=run, sleep=sleep, monotonic_ns=lambda: elapsed,
+            utc_now=lambda: "2026-01-01T00:00:00+00:00")
+        self.assertEqual(calls, [2])
+        self.assertEqual(len(report["samples"]), 1)
+
     def test_partition_no_double_count(self):
         r = probe.analyze(snapshot())
         self.assertEqual(r["bytes"], {"valid_observed_total": 13824,

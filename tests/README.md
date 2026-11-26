@@ -269,12 +269,27 @@ and links, invalid schemas, excessive input and aggregate overflow fail
 closed. Invalid byte sizes are counted separately. Client IDs are replaced
 by local ordinals in the report; these are not stable across captures.
 
-Nine host-only tests exercise the actual accounting and CLI, including
-conflicts, missing links, shared allocations, bounds and redaction. These
-are synthetic allocation graphs, not live IORegistry ownership evidence.
+Twenty host-only tests exercise the actual accounting, registry parser,
+time-series analyzer and CLI, including conflicts, missing links, shared
+allocations, duplicate observations, failed captures, bounds and redaction.
+These are synthetic allocation graphs and registry text, not live ownership
+evidence.
 Observed bytes do not establish physical residency, GART usage or complete
 per-process VRAM; shared bytes are not duplicated in exclusive totals.
-No live queue collector, memory allocation policy, eviction or kernel
+The optional macOS collector samples `ioreg -r -c IOAccelerator -d 1 -l -w0` without
+changing system state. For example, `python3 tools/gpu_memory_probe.py
+--collect-duration 600 --interval 5 --output memory-series.json` captures
+with a ten-minute monotonic capture budget (no new capture starts at or after
+its deadline; each subprocess timeout is capped by the remaining budget and 15 s).
+Late results become gaps. OS process creation/cleanup, scheduling and final JSON
+serialization may exceed the nominal duration; this is not a hard real-time
+process deadline. It discards the raw registry dump and writes only UTC/elapsed
+capture times and matching counter values. A delta is calculated only between
+adjacent successful samples with exactly one valid occurrence per capture;
+duplicate matches, high-bit values, missing properties and failed captures
+remain explicit and do not become zeroes. The collector does not establish
+accelerator identity, allocation ownership or causation, and it cannot be run
+by the host-only test suite. No memory allocation policy, eviction or kernel
 changes are included. Existing queue-trace and memory-layout guards remain
 unchanged; native ownership/lifetime validation is still pending.
 

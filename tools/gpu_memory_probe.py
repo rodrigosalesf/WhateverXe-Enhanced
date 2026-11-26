@@ -5,13 +5,17 @@ This schema is a diagnostic interchange format, not a native Apple ABI.
 No allocation, task, queue or context identity is discovered by this tool.
 """
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 import re
+import subprocess
 import sys
+import time
 
 MAX_INPUT = 4 * 1024 * 1024
 MAX_RECORDS = 8192
 MAX_LINKS = 32768
+MAX_SERIES_SAMPLES = 720
 U64_MAX = (1 << 64) - 1
 SCHEMA = "wex-memory-accounting-v1"
 
@@ -164,13 +168,147 @@ def analyze_registry_text(snapshot):
             ]}
 
 
+def analyze_registry_series(samples):
+    """Analyze ordered, timestamped raw captures without inferring device identity."""
+    if isinstance(samples, (str, bytes, dict)) or not hasattr(samples, "__iter__"):
+        raise ValueError("invalid registry series")
+    report_samples = []
+    previous = None
+    previous_elapsed = -1
+    for sample in samples:
+        if len(report_samples) >= MAX_SERIES_SAMPLES:
+            raise ValueError("too many registry samples")
+        if (not isinstance(sample, dict) or
+                set(sample) != {"elapsed_ns", "captured_at_utc", "registry_text"}):
+            raise ValueError("invalid registry sample")
+        elapsed = sample["elapsed_ns"]
+        timestamp = sample["captured_at_utc"]
+        text = sample["registry_text"]
+        if (type(elapsed) is not int or not 0 <= elapsed < U64_MAX or
+                elapsed <= previous_elapsed or not isinstance(timestamp, str) or
+                len(timestamp) > 64 or not isinstance(text, (str, type(None)))):
+            raise ValueError("invalid registry sample values")
+        try:
+            parsed_timestamp = datetime.fromisoformat(timestamp)
+        except ValueError as exc:
+            raise ValueError("invalid registry timestamp") from exc
+        if parsed_timestamp.tzinfo is None or parsed_timestamp.utcoffset() != timedelta(0):
+            raise ValueError("registry timestamp must be UTC")
+        counters = analyze_registry_text(text)["counters"] if text is not None else None
+        item = {"elapsed_ns": elapsed, "captured_at_utc": timestamp,
+                "capture_status": "ok" if counters is not None else "capture-failed",
+                "counters": counters}
+        for key in COUNTER_KEYS:
+            if counters is None:
+                continue
+            prior = previous["counters"][key] if previous and previous["counters"] else None
+            current = counters[key]
+            delta = {"status": "missing-observation"}
+            if previous is None:
+                delta = {"status": "no-previous-sample"}
+            elif prior is not None and current["distinct_values"]:
+                one_prior = (prior["invalid_tokens"] == 0 and
+                             len(prior["distinct_values"]) == 1 and
+                             prior["distinct_values"][0]["occurrences"] == 1)
+                one_current = (current["invalid_tokens"] == 0 and
+                               len(current["distinct_values"]) == 1 and
+                               current["distinct_values"][0]["occurrences"] == 1)
+                if not one_prior or not one_current:
+                    delta = {"status": "ambiguous-observation"}
+                else:
+                    old, new = prior["distinct_values"][0], current["distinct_values"][0]
+                    if old["status"] != "unsigned-observed" or new["status"] != "unsigned-observed":
+                        delta = {"status": "suspicious-value"}
+                    else:
+                        delta = {"status": "computed",
+                                 "bytes": int(new["raw_decimal"]) - int(old["raw_decimal"]),
+                                 "elapsed_ns": elapsed - previous["elapsed_ns"]}
+            current["delta_from_previous"] = delta
+        report_samples.append(item)
+        previous = item
+        previous_elapsed = elapsed
+    if not report_samples:
+        raise ValueError("empty registry series")
+    return {"schema": "wex-memory-registry-series-v1", "samples": report_samples,
+            "limitations": [
+                "Only exact counter values and capture timing are retained; raw IORegistry text is discarded.",
+                "A delta is reported only between adjacent captures with exactly one valid occurrence per capture.",
+                "Repeated values may be aliases and are never summed or treated as independent allocations.",
+                "The collector does not prove accelerator identity, allocation ownership, residency or causation.",
+                "High-bit and all-ones values are suspicious observations, not proof of underflow.",
+                "A failed or missing capture is a gap, never a zero-valued sample.",
+                "No driver, kernel, allocation policy or system configuration is changed."
+            ]}
+
+
+def collect_registry_series(duration_seconds, interval_seconds, run_capture=subprocess.run,
+                            sleep=time.sleep, monotonic_ns=time.monotonic_ns,
+                            utc_now=lambda: datetime.now(timezone.utc).isoformat(timespec="milliseconds")):
+    """Capture read-only ioreg snapshots on an absolute monotonic schedule."""
+    if (type(duration_seconds) is not int or not 2 <= duration_seconds <= 3600 or
+            type(interval_seconds) is not int or not 1 <= interval_seconds <= 300):
+        raise ValueError("invalid collection bounds")
+    # The deadline is exclusive for capture starts.
+    sample_count = (duration_seconds + interval_seconds - 1) // interval_seconds
+    if sample_count > MAX_SERIES_SAMPLES:
+        raise ValueError("too many collection samples")
+    start = monotonic_ns()
+    interval_ns = interval_seconds * 1_000_000_000
+    deadline = start + duration_seconds * 1_000_000_000
+
+    def captures():
+        for index in range(sample_count):
+            target = start + index * interval_ns
+            now = monotonic_ns()
+            if now >= deadline:
+                break
+            if target > now:
+                sleep((target - now) / 1_000_000_000)
+            remaining_ns = deadline - monotonic_ns()
+            if remaining_ns <= 0:
+                break
+            text = None
+            try:
+                result = run_capture(["/usr/sbin/ioreg", "-r", "-c", "IOAccelerator", "-d", "1", "-l", "-w0"],
+                                     capture_output=True, text=True, check=True,
+                                     timeout=min(15, remaining_ns / 1_000_000_000))
+                if isinstance(result.stdout, str) and len(result.stdout) <= MAX_INPUT:
+                    text = result.stdout
+            except (OSError, subprocess.SubprocessError, UnicodeError):
+                pass
+            finished = monotonic_ns()
+            # Spawn/cleanup overhead may outlast the subprocess timeout.
+            # Keep the true timestamp, but do not accept late observations.
+            if finished > deadline:
+                text = None
+            yield {"elapsed_ns": finished - start,
+                   "captured_at_utc": utc_now(), "registry_text": text}
+    return analyze_registry_series(captures())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("snapshot", help="offline normalized allocation/ownership JSON or registry text")
+    parser.add_argument("snapshot", nargs="?", help="offline normalized allocation/ownership JSON or registry text")
     parser.add_argument("--registry-text", action="store_true",
                         help="inspect raw byte-counter observations without attribution")
+    parser.add_argument("--collect-duration", type=int,
+                        help="collect read-only IORegistry samples for this many seconds")
+    parser.add_argument("--interval", type=int, default=5,
+                        help="seconds between samples when using --collect-duration (default: 5)")
+    parser.add_argument("--output", help="write the filtered time-series JSON to this path")
     args = parser.parse_args()
     try:
+        if args.collect_duration is not None:
+            if args.snapshot or not args.output or args.registry_text:
+                parser.error("collection requires --output and cannot be combined with a snapshot or --registry-text")
+            report = collect_registry_series(args.collect_duration, args.interval)
+            encoded = json.dumps(report, indent=2, sort_keys=True) + "\n"
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(encoded)
+            print(encoded, end="")
+            return 0
+        if not args.snapshot or args.output:
+            parser.error("a snapshot is required unless --collect-duration is used")
         with open(args.snapshot, "rb") as f:
             data = f.read(MAX_INPUT + 1)
         if len(data) > MAX_INPUT:
