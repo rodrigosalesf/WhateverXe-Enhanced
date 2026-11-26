@@ -171,6 +171,30 @@ wake acquisition, RC6 enablement or power change is implemented.
 The existing ForceWake IRQ protection and its tests are unchanged; the
 optional native donor replay still requires the original accelerator binary.
 
+### E5.7 display power diagnostics and shared restoration
+
+Run `python3 tools/test.py --only display_power_probe --only display13_shared_restore --require display_power_probe --require display13_shared_restore`.
+The production GGTT restore helper now rejects the ambiguous all-ones
+requested word before writing and rejects all-ones posting reads explicitly.
+The existing shared restoration fixture executes the production wrapper
+with stopped/live consumers, invalid initial and posting values, and retry;
+power-well restoration and native engine enable remain modeled leaves.
+An ambiguous initial word must remain untouched, pending restoration must
+remain set, and engine enable must not proceed until a valid retry.
+This does not prove physical MMIO or sleep/wake behavior.
+
+The offline `python3 tools/display_power_probe.py snapshot.json` accepts
+layout `intel-display12-13-dmc`, before/after objects with time_ns, epoch,
+and optional unsigned dc5/dc6 words. Register layout follows Linux v6.12
+[intel_dmc_regs.h](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/i915/display/intel_dmc_regs.h)
+and [intel_dmc.c](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/i915/display/intel_dmc.c).
+DC5/DC6 are DMC entry event counts, not residency or current power state.
+Missing, invalid, all-ones, decreasing and discontinuous samples remain
+distinct; increasing counts are conditional differences, not a proof
+against unseen wrap or reset. Seven host-only test methods exercise the
+actual decoder and bounded CLI. No new DC policy, DMC firmware or live
+counter collection is enabled. Hardware power savings are not established.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched
