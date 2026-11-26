@@ -109,5 +109,109 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(report["audio_outputs"], {"status": "invalid-response"})
 
 
+class EldTests(unittest.TestCase):
+    @staticmethod
+    def eld(sads, name=b"PRIVATE", connection=0, extra=b""):
+        # Independent literal ELD v2 layout: 4-byte header, 16-byte fixed
+        # baseline, monitor name, 3-byte SADs, padding to dword boundary.
+        total = 20 + len(name) + sum(map(len, sads))
+        size = (total + 3) & ~3
+        buf = bytearray(size)
+        buf[0] = 0x10
+        buf[2] = (size - 4) // 4
+        buf[4] = 0x60 | len(name)
+        buf[5] = len(sads) * 16 + connection * 4
+        buf[7] = 0x01
+        buf[8:16] = b"PORTSECR"
+        buf[20:20 + len(name)] = name
+        buf[20 + len(name):total] = b"".join(sads)
+        return bytes(buf) + extra
+
+    def test_stereo_rates_and_redaction(self):
+        raw = self.eld([b"\x09\x06\x01"], extra=b"VENDORSECRET")
+        self.assertEqual(probe.eld_audio(raw), {
+            "status": "valid", "version": 2, "baseline_bytes": 32,
+            "connection": "HDMI", "short_audio_descriptors": 1,
+            "speaker_allocation_mask": 1,
+            "stereo_pcm16_rates_hz": [44100, 48000]})
+
+    def test_dp_and_maximum_name_count(self):
+        raw = self.eld([b"\x0f\x7f\x07"] * 15, name=b"A" * 16, connection=1)
+        result = probe.eld_audio(raw)
+        self.assertEqual(result["connection"], "DisplayPort")
+        self.assertEqual(result["short_audio_descriptors"], 15)
+        self.assertEqual(result["baseline_bytes"], 84)
+        self.assertEqual(result["stereo_pcm16_rates_hz"],
+                         [32000, 44100, 48000, 88200, 96000, 176400, 192000])
+
+    def test_no_cross_descriptor_capability_invention(self):
+        # Mono LPCM at 44.1, 24-bit-only stereo at 48, compressed stereo,
+        # and one valid stereo/16-bit 96 kHz. Do not combine their fields.
+        sads = [b"\x08\x02\x01", b"\x09\x04\x04",
+                b"\x11\x06\x01", b"\x09\x10\x01"]
+        self.assertEqual(probe.eld_audio(self.eld(sads))["stereo_pcm16_rates_hz"],
+                         [96000])
+        edid = probe.edid_audio(base(1) + cta(bytes([0x20 + 12]) + b"".join(sads)))
+        self.assertEqual(edid["stereo_pcm16_rates_hz"], [96000])
+
+    def test_reserved_bits_and_zero_sads(self):
+        for sads in ([], [b"\x89\x06\x01"], [b"\x09\x86\x01"],
+                     [b"\x09\x06\x81"], [b"\x09\x00\x01"]):
+            self.assertEqual(probe.eld_audio(self.eld(sads))["stereo_pcm16_rates_hz"], [])
+
+    def test_truncation_bad_length_and_sad_overrun(self):
+        raw = self.eld([b"\x09\x06\x01"])
+        for length in range(len(raw)):
+            self.assertEqual(probe.eld_audio(raw[:length])["status"], "invalid")
+        for index, value in ((2, 3), (2, 255), (4, 0x71), (5, 0xf0)):
+            bad = bytearray(raw)
+            bad[index] = value
+            result = probe.eld_audio(bytes(bad))
+            self.assertEqual(result["status"], "invalid")
+            self.assertNotIn("stereo_pcm16_rates_hz", result)
+
+    def test_unknown_version_and_connection(self):
+        bad = bytearray(self.eld([]))
+        bad[0] = 0xf8
+        self.assertEqual(probe.eld_audio(bytes(bad))["status"], "unsupported")
+        self.assertEqual(probe.eld_audio(self.eld([], connection=2))["status"],
+                         "unsupported")
+
+    def test_edid_eld_compare_explicit_rates(self):
+        edid = probe.edid_audio(base(1) + cta(b"\x23\x09\x06\x01", 0x40))
+        eld = probe.eld_audio(self.eld([b"\x09\x0c\x01"]))
+        compared = probe.compare_audio_evidence(edid, eld)
+        self.assertEqual(compared["common_stereo_pcm16_rates_hz"], [48000])
+        self.assertEqual(compared["edid_only_rates_hz"], [44100])
+        self.assertEqual(compared["eld_only_rates_hz"], [88200])
+        basic_only = probe.edid_audio(base(1) + cta(flags=0x40))
+        self.assertTrue(basic_only["advertises_audio"])
+        self.assertEqual(probe.compare_audio_evidence(basic_only, eld)
+                         ["common_stereo_pcm16_rates_hz"], [])
+        self.assertEqual(probe.compare_audio_evidence(edid, probe.eld_audio(b"")),
+                         {"status": "unavailable"})
+
+    def test_cli_offline_real_files(self):
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            e = root / "eld.bin"
+            d = root / "edid.bin"
+            e.write_bytes(self.eld([b"\x09\x06\x01"]))
+            d.write_bytes(base(1) + cta(b"\x23\x09\x04\x01"))
+            command = [sys.executable, probe.__file__, "--eld-file", str(e),
+                       "--edid-file", str(d)]
+            result = subprocess.run(command, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(json.loads(result.stdout)["comparison"]
+                             ["common_stereo_pcm16_rates_hz"], [48000])
+            self.assertNotIn(b"PRIVATE", result.stdout)
+            e.write_bytes(b"")
+            self.assertEqual(subprocess.run(command, capture_output=True).returncode, 1)
+            e.write_bytes(bytes(4097))
+            self.assertEqual(subprocess.run(command, capture_output=True).returncode, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
