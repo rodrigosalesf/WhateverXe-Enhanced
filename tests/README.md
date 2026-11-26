@@ -258,6 +258,33 @@ No live queue collector, memory allocation policy, eviction or kernel
 changes are included. Existing queue-trace and memory-layout guards remain
 unchanged; native ownership/lifetime validation is still pending.
 
+### E5.11 bounded flight recorder core
+
+Run `python3 tools/test.py --require xelp_flight_recorder --require xelp_flight_recorder_mutants`.
+The standalone C++ header uses compile-time fixed capacity (1–1024 entries),
+value-only event kinds and caller-supplied monotonic timestamps. Disabled by
+default; explicit reset enables and clears history. A full buffer overwrites
+the oldest event and reports the number lost; indexed reads are chronological.
+Freeze preserves the recent history until reset. Invalid event kinds and
+backward timestamps cannot change the buffer. No dynamic allocation, I/O,
+pointers or process identifiers are stored as event payloads.
+
+The CPU test automatically discovered by the runner exercises the actual
+header under address and undefined-behavior sanitizers, including disabled
+state, reset, wrap, single-slot capacity, freeze and rejected input. The
+registered semantic-mutant test requires real assertion failures when
+chronological ordering or freeze protection is deliberately broken.
+Conceptual references: [Linux tracing ring-buffer design](https://docs.kernel.org/trace/ring-buffer-design.html)
+and [Mesa hang debugging](https://docs.mesa3d.org/graphics-debugging/debugging-misrenderings-crashes.html).
+No third-party recorder implementation is copied.
+
+This core is not installed or called by the kernel yet. It requires a
+single owner or external serialization, a verified timestamp source and
+an approved export contract before wiring any runtime producer/consumer.
+No IRQ safety, concurrent writers, kernel dump persistence, live collection,
+or performance overhead measurement is demonstrated. No additional boot
+arguments or default driver behavior changes are introduced.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched
