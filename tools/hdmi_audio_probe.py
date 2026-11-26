@@ -145,6 +145,9 @@ def summarize_node(node):
         number = numeric_property(node.get(key))
         if number is not None:
             result[key] = f"0x{number:x}"
+            if key == "status-mask":
+                result["codec-status-mask-set-bits"] = [
+                    bit for bit in range(16) if number & (1 << bit)]
     if "IODisplayEDID" in node:
         result["edid_audio"] = edid_audio(node["IODisplayEDID"])
     if "hda-gfx" in node:

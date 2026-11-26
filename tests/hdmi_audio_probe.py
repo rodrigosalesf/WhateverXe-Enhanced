@@ -30,6 +30,11 @@ def cta(payload=b"", flags=0):
 
 
 class ProbeTests(unittest.TestCase):
+    def test_hda_status_mask_is_decoded_without_claiming_codec_response(self):
+        summary = probe.summarize_node({"status-mask": 0x5})
+        self.assertEqual(summary["status-mask"], "0x5")
+        self.assertEqual(summary["codec-status-mask-set-bits"], [0, 2])
+
     def test_base_only(self):
         result = probe.edid_audio(base(0))
         self.assertEqual(result["status"], "valid")

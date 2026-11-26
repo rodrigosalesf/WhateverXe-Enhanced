@@ -87,7 +87,9 @@ It reports selected properties and counts rather than raw EDID, device names,
 serials or machine identifiers. The snapshot includes PCI audio-class candidate
 counts and compares `hda-gfx` values on `AppleIntelFramebuffer`,
 `AppleHDAController` and `AppleGFXHDA` services. The values themselves are
-never emitted. A shared value is only evidence that candidate properties match;
+never emitted. The HDA `status-mask` is also reported with its set bit positions,
+beside observed codec addresses and vendor IDs; these registry properties alone
+do not prove that a codec answered a verb. A shared value is only evidence that candidate properties match;
 it does not establish IORegistry provider ownership, HDA codec response,
 AppleGFXHDA attachment, or playback. This collector does not read live ELD,
 inspect HDA verbs or interrupts, or change device state. Invalid class responses
