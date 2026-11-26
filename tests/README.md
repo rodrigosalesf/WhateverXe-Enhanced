@@ -153,6 +153,24 @@ mapping, access ownership, coherent sampling and physical clocks remain
 unverified. This tool neither acquires forcewake nor performs MMIO or changes
 frequency policy. No hardware power or performance improvement is claimed.
 
+### E5.6 RC6 interval diagnostics
+
+Run `python3 tools/test.py --only gpu_rc6_probe --require gpu_rc6_probe`.
+The offline decoder accepts two caller-supplied observations with explicit
+layout `intel-xe-lp-gen12-rc6`, unsigned monotonic time_ns, reset epoch,
+and unsigned 32-bit rc6 words. The Gen12 RC6 register is 0x138108;
+the 1280 ns tick and 32-bit wrap follow Linux v6.12
+[intel_rc6.c](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/i915/gt/intel_rc6.c)
+and [intel_gt_regs.h](https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/i915/gt/intel_gt_regs.h).
+The result is conditional on the caller's identity and counter continuity.
+Reject invalid timestamps, reset epoch changes, inaccessible words and
+windows that could include a full wrap (including one tick uncertainty).
+Do not clamp inconsistent residency to 100%; sub-tick ambiguity is explicit.
+Fixtures exercise real parser, output and bounded CLI. No register reads,
+wake acquisition, RC6 enablement or power change is implemented.
+The existing ForceWake IRQ protection and its tests are unchanged; the
+optional native donor replay still requires the original accelerator binary.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched
