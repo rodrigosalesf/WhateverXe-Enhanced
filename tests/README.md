@@ -70,6 +70,26 @@ that audio is unsupported. The investigation is informed by
 and [initial findings](https://github.com/b00t0x/WhateverXe/issues/124).
 No codec wake, donor hooks or kernel changes are included.
 
+### E5.2 offline ELD validation
+
+The same registered `hdmi_audio_probe` test now also checks ELD v2 baseline
+lengths, monitor-name and descriptor bounds, maximum descriptor counts,
+connection type, and explicit stereo 16-bit LPCM rates. Layout reference:
+[Linux v6.12 drm_eld.h](https://github.com/torvalds/linux/blob/v6.12/include/drm/drm_eld.h).
+The collector does not combine channels, rates or bit depth from different
+descriptors; a basic-audio flag is not treated as an explicit SAD. It rejects
+truncated/malformed baseline structures and reports unsupported versions or
+connection types separately. Optional vendor bytes are not interpreted.
+Synthetic fixtures and a subprocess CLI check exercise the actual parser
+and report consumer, including redaction and bounded input. This is not
+a live ELD read, ELD generator, audio route selection, or codec programming test.
+
+Offline binary fixtures can be analyzed on CI hosts with
+`python3 tools/hdmi_audio_probe.py --eld-file eld.bin --edid-file edid.bin`.
+The EDID is optional. Comparisons report intersection/differences in explicit
+PCM rate evidence, not an association between physical displays or proof of
+playback. No kernel changes or new boot arguments are included.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched
