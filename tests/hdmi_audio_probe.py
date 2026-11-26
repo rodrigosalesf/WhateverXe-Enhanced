@@ -107,6 +107,8 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(report["audio_outputs"]["transport_counts"], {"HDMI": 1})
         self.assertEqual(report["hda_gfx_association"]["status"], "shared-value-observed")
         self.assertEqual(report["registry"]["IOPCIDevice"]["pci_audio_class_candidates"], 1)
+        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_class_code_observations"], 1)
+        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_audio_class_status"], "observed")
         self.assertEqual(report["registry"]["IOPCIDevice"]["nodes"], [])
         self.assertNotIn("private-", json.dumps(report))
         self.assertNotIn("private-route-token", json.dumps(report))
@@ -117,11 +119,25 @@ class ProbeTests(unittest.TestCase):
                                      (["gpu-a"], ["audio-b"], "different-values-observed"),
                                      (["gpu-a"], [], "incomplete"),
                                      ([], [], "not-observed")):
-            result = probe.hda_gfx_association(gpu, audio)
+            result = probe.hda_gfx_association(
+                gpu, audio, {"gpu": "observed", "hda": "observed"})
             self.assertEqual(result["status"], expected)
             self.assertNotIn("shared-token", json.dumps(result))
             self.assertNotIn("gpu-a", json.dumps(result))
             self.assertNotIn("audio-b", json.dumps(result))
+        unavailable = probe.hda_gfx_association(
+            [], [], {"gpu": "observed", "hda": "invalid-response"})
+        self.assertEqual(unavailable["status"], "incomplete")
+
+    def test_pci_class_absence_is_reported_as_unavailable(self):
+        registry = plistlib.dumps([{"vendor-id": 0x8086, "device-id": 0x46a3}])
+        result = probe.registry_class(
+            "IOPCIDevice", lambda args, timeout=15: registry)
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["pci_class_code_observations"], 0)
+        self.assertEqual(result["pci_audio_class_candidates"], 0)
+        self.assertEqual(result["pci_audio_class_status"], "unavailable")
+        self.assertEqual(result["nodes"], [])
 
     def test_unavailable_is_not_zero(self):
         report = probe.collect(lambda args, timeout=15: None)

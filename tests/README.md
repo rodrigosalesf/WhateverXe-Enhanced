@@ -90,8 +90,11 @@ counts and compares `hda-gfx` values on `AppleIntelFramebuffer`,
 never emitted. A shared value is only evidence that candidate properties match;
 it does not establish IORegistry provider ownership, HDA codec response,
 AppleGFXHDA attachment, or playback. This collector does not read live ELD,
-inspect HDA verbs or interrupts, or change device state. Missing properties or
-classes are not proof that audio is unsupported. The investigation is informed by
+inspect HDA verbs or interrupts, or change device state. Invalid class responses
+make the association result incomplete rather than implying that a property is
+absent. A zero PCI audio-class count is qualified by whether PCI class codes
+were readable. Missing properties or classes are not proof that audio is
+unsupported. The investigation is informed by
 [jkbuha's contribution](https://github.com/b00t0x/WhateverXe/issues/150)
 and [initial findings](https://github.com/b00t0x/WhateverXe/issues/124).
 No codec wake, donor hooks or kernel changes are included.
