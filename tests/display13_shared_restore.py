@@ -20,10 +20,14 @@ code=r'''
 #include <new>
 struct IOWorkLoop {};
 struct Map {std::vector<uint32_t> regs=std::vector<uint32_t>(0x400000);uintptr_t getVirtualAddress(){return reinterpret_cast<uintptr_t>(regs.data());}};
-bool reject=false;unsigned enables=0;
+bool reject=false,rejectAllOnes=false;unsigned enables=0;
 struct Display13FBBootIO {
  Map *map;bool readable(uint32_t r){return r<0x1000000;}
- uint32_t read(uint32_t r){return reject && r==0x42084 ? map->regs[r/4]&~(1U<<30):map->regs[r/4];}
+ uint32_t read(uint32_t r){
+  const auto v=map->regs[r/4];
+  if(r==0x42084 && rejectAllOnes && (v&(1U<<30)))return UINT32_MAX;
+  return reject && r==0x42084 ? v&~(1U<<30):v;
+ }
 };
 struct Context {
  void *power=nullptr,*controller=nullptr;IOWorkLoop *workLoop=nullptr;Map *map=nullptr;
@@ -57,7 +61,7 @@ struct XE {
 METHOD
 bool inGate(const IOWorkLoop*){return true;}bool tryGate(IOWorkLoop*){return true;}void openGate(IOWorkLoop*){}
 int main(){
- for(unsigned binding:{UINT32_MAX,0U,1U,2U})for(unsigned state=0;state<4;++state)for(bool active:{false,true}) {
+ for(unsigned binding:{UINT32_MAX,0U,1U,2U})for(unsigned state=0;state<6;++state)for(bool active:{false,true}) {
   Map map;IOWorkLoop loop;XE xe;callbackXE=&xe;
   alignas(8) uint8_t ctl[0x1c20]{},power[0x80]{};
   *reinterpret_cast<void**>(ctl+0xe00)=&loop;
@@ -66,22 +70,24 @@ int main(){
   c.bridge.begun=true;c.bridge.state.suspended=true;c.transcoders.dsi0Pipe=binding;
   xe.adlnWorkLoopInGate=reinterpret_cast<uintptr_t>(inGate);xe.adlnWorkLoopTryClose=reinterpret_cast<uintptr_t>(tryGate);xe.adlnWorkLoopOpen=reinterpret_cast<uintptr_t>(openGate);
   map.regs[0x45404/4]=0xfc0f;map.regs[0x4438c/4]=c.dbuf.mbus;
-  map.regs[0x42084/4]=state==1?0x40000123:state==2?UINT32_MAX:0x123;
+  const uint32_t initial=state==1?0x40000123:state==2?UINT32_MAX:state==4?0xbfffffff:0x123;
+  map.regs[0x42084/4]=initial;
   const auto pipe=binding<3?binding:2;
   map.regs[c.transcoders.control(pipe)/4]=active?0xc0000000:0;
   if(binding<3)map.regs[0x6B400/4]=((pipe?pipe+4:0)<<12)|(active?0x80000000:0);
-  reject=state==3;enables=0;
+  reject=state==3;rejectAllOnes=state==5;enables=0;
   const auto ready=xe.restoreDisplay13ResourcesLocked(power,true);
   const bool expected=!active && state<2;
   assert(ready==expected && enables==unsigned(expected) && c.restorePending==!expected);
   if(expected)assert(map.regs[0x42084/4]==0x40000123 && display13FBIRQ.powerLost && display13FBIRQ.rearmPending);
-  if(active)assert(map.regs[0x42084/4]==(state==1?0x40000123:state==2?UINT32_MAX:0x123));
+  // A pre-write value whose requested result is all-ones must stay untouched.
+  if(active || state==4)assert(map.regs[0x42084/4]==initial);
   // A later caller retries the same lost-power generation. Busy consumers
   // or transient register failure must not make retry permanently impossible.
   const auto epoch=c.restoreEpoch;
   map.regs[c.transcoders.control(pipe)/4]=0;
   if(binding<3)map.regs[0x6B400/4]&=~0x80000000U;
-  reject=false;map.regs[0x42084/4]=0x123;
+  reject=false;rejectAllOnes=false;map.regs[0x42084/4]=0x123;
   if(!ready){assert(xe.restoreDisplay13ResourcesLocked(power,false));assert(c.restoreEpoch==epoch && !c.restorePending);}
   // Ordinary peer wake with retained engine/clock is a no-op, even if the
   // GGTT register would fail readback. No shared reprogramming while live.
