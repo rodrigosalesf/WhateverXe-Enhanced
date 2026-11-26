@@ -50,6 +50,26 @@ route failure, common/backend failure and hook installation, independently of
 native startup success. These are CPU fixtures; neither successful sampling nor
 hook installation demonstrates working acceleration or hardware qualification.
 
+## Enhanced E5 HDMI audio preflight
+
+Run `python3 tools/test.py --only hdmi_audio_probe --require hdmi_audio_probe`.
+The CPU fixture calls the actual user-space collector with synthetic ioreg
+plists and system_profiler JSON. CTA-861 audio evidence is independent of the
+HDMI vendor block: basic audio and short audio descriptors are reported only
+after complete EDID length, block checksums and CTA data-block bounds pass.
+Fixtures cover multiple extensions, truncation, malformed lengths, checksum
+failure after a positive block, missing commands and output redaction.
+These are parser/collector checks, not an AppleHDA, ELD, HDA verb, MMIO or
+hardware playback test.
+
+On macOS run `python3 tools/hdmi_audio_probe.py` for a read-only JSON snapshot.
+It reports selected properties and counts rather than raw EDID, device names,
+serials or machine identifiers. Missing properties or classes are not proof
+that audio is unsupported. The investigation is informed by
+[jkbuha's contribution](https://github.com/b00t0x/WhateverXe/issues/150)
+and [initial findings](https://github.com/b00t0x/WhateverXe/issues/124).
+No codec wake, donor hooks or kernel changes are included.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched
