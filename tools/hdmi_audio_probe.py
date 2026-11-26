@@ -305,6 +305,7 @@ def collect(run=command):
         audio_property_count += registry[cls].pop("_hda_gfx_property_count", 0)
     for result in registry.values():
         result.pop("_hda_gfx_values", None)
+        result.pop("_hda_gfx_property_count", None)
     association_classes = {"AppleIntelFramebuffer": registry["AppleIntelFramebuffer"]["status"],
                            "AppleHDAController": registry["AppleHDAController"]["status"],
                            "AppleGFXHDA": registry["AppleGFXHDA"]["status"]}

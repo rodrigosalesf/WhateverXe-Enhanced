@@ -119,6 +119,7 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(report["registry"]["IOPCIDevice"]["nodes"], [])
         self.assertNotIn("private-", json.dumps(report))
         self.assertNotIn("private-route-token", json.dumps(report))
+        self.assertNotIn("_hda_gfx_", json.dumps(report))
         self.assertNotIn("IODisplayEDID", json.dumps(report))
 
     def test_hda_gfx_comparison_is_cautious_and_redacted(self):
