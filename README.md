@@ -7,7 +7,7 @@
 
 An experimental extension of [b00t0x/WhateverXe](https://github.com/b00t0x/WhateverXe), a Lilu plugin derived from WhateverGreen for selected Intel Xe-LP integrated GPUs. Enhanced focuses on defensive kernel code, framebuffer reliability, hardware diagnostics and reproducible graphics validation while retaining upstream architecture and credits.
 
-**Current development milestone: E4**, based on WhateverXe 0.8.5.
+**Current published milestone: E4**, based on WhateverXe 0.8.5. **Development: E5** (experimental, not yet released).
 
 [Download Enhanced E4](https://github.com/rodrigosalesf/WhateverXe-Enhanced/releases/tag/v0.8.5-enhanced-e4) · [E4 source](https://github.com/rodrigosalesf/WhateverXe-Enhanced/tree/v0.8.5-enhanced-e4) · [Installation guide (PT-BR)](https://github.com/rodrigosalesf/WhateverXe-Enhanced/blob/publish-e4/INSTALL-E4-PT-BR.md) · [Report your hardware results](https://github.com/rodrigosalesf/WhateverXe-Enhanced/issues/new)
 
@@ -94,17 +94,43 @@ Select the target GPU with `--registry-id` when multiple devices are present. A 
 
 ## Enhanced roadmap
 
+**Long-term objective:** a complete, reliable Intel Xe-LP graphics solution for the supported Hackintosh configurations, within the GPU's physical capabilities and the macOS driver interfaces. Completeness is defined by verified rendering, compute, media, display, power, recovery, application compatibility and safe deployment, not by a GPU name, reported VRAM or Metal label. Begin with the Acer Alder Lake-H reference configuration and expand only with evidence.
+
 | Milestone | Focus | Status |
 | --- | --- | --- |
 | E1 | Core stability | Implemented |
 | E2 | Hardware intelligence | Implemented |
 | E3 | Display and diagnostics | Implemented |
-| E4 | Graphics stability and Metal validation | Implemented; initial real-hardware validation |
-| E5 | **HDMI Audio & Advanced Power Management:** prioritize HDMI audio detection and playback; retain telemetry, counter integrity, RPS, ForceWake, RC6 and display power work | Planned — HDMI audio is the highest priority |
-| E6 | **Metal 3 & Advanced Graphics:** capability audit, feature mapping, compiler/driver adaptation and validation | Planned — entire milestone dedicated to Metal 3 research |
-| E7 | Hardware video acceleration and multimedia validation | Planned |
-| E8 | macOS compatibility validation | Planned |
-| E9 | Hardware-specific improvements | Planned |
+| E4 | Graphics stability and Metal validation | Published; initial hardware validation |
+| E5 | HDMI Audio, Power & Diagnostics | In development; existing 12-module scope preserved |
+| E6 | **Metal 3 & Advanced Graphics** | Planned; revised 10-module sequence |
+| E7 | Multimedia & Hardware Video Acceleration | Planned |
+| E8 | Advanced macOS Graphics Integration | Planned |
+| E9 | Hardware Optimization & Reliability | Planned |
+| E10 | Full Xe-LP Graphics Qualification | Planned |
+
+### Development sequence and release gates
+
+Finish the existing E5 workstream before beginning E6 development. Do not renumber or remove E5 tasks. The present CI-only phase permits completion of the engineering deliverables and an explicitly experimental candidate, not physical qualification. Track every deferred hardware test, incomplete functional fix and blocker separately; diagnostics and simulated state machines do not count as a working HDMI stream, real power management, or complete driver support. Where a functional fix cannot be safely developed without hardware or donor access, record it as unresolved and retain the existing path. Do not silently close it or declare E5 fully qualified. Any decision to move to E6 with unresolved E5 functional work must be explicitly recorded and approved by the maintainer. No fixed calendar dates are promised.
+
+For each module: review exact source/donor and licensing, implement a scoped change, run mandatory CPU and regression tests and DEBUG/RELEASE builds on GitHub Actions, review the PR, integrate into the milestone branch, and record evidence and remaining hardware checks. Compile-only, simulated, and physical results must be distinguished. Never bypass failed checks to meet a schedule. Maintain the published E4 baseline and a bootable rollback.
+
+### E5 — retained 12-module sequence
+
+| Module | Engineering task (unchanged scope) |
+| --- | --- |
+| E5.1 | HDMI Audio Core — identify controller, codec, framebuffer and integration points; implement qualified detection fixes when evidence permits |
+| E5.2 | HDMI Audio Stream Engine — EDID/ELD, PCM, converter/stream routing and real playback |
+| E5.3 | HDMI Hotplug & Recovery — invalidate stale state, reconnect and resume safely |
+| E5.4 | GPU Telemetry Intelligence — counter integrity and reliable activity observations |
+| E5.5 | Dynamic Frequency Management — actual/requested clocks, RP limits, RPS |
+| E5.6 | ForceWake & RC6 Optimization — ownership, bounded access, residency and evidence-based power changes |
+| E5.7 | Display Power Management — display wells, DC5/DC6, framebuffer restoration |
+| E5.8 | Advanced Metal Validation — textures, mipmaps, coherence and ordered GPU work |
+| E5.9 | Frame Pacing Diagnostics — presentation timing, VBlank and long-frame gaps |
+| E5.10 | GPU Memory Intelligence — resource accounting and validated ownership |
+| E5.11 | GPU Flight Recorder — bounded optional event history and safe export |
+| E5.12 | Safe Installation & ABI Validation — read-only preflight, provenance and rollback |
 
 ### E5 priority: HDMI audio compatibility
 
@@ -127,31 +153,75 @@ HDMI audio remains the first priority. The following planned work extends the E5
 
 The [MeowXE3 findings](https://github.com/cuadra8998/MeowXE3/blob/main/docs/FINDINGS.md), [development notes](https://github.com/cuadra8998/MeowXE3/blob/main/docs/CONTINUING.md) and [regression tests](https://github.com/cuadra8998/MeowXE3/tree/main/tools/tests) are complementary research references. They describe a different Xe3/Linux-driver architecture, not a drop-in dependency or a demonstrated HDMI-audio fix. Their reported performance results are not Enhanced benchmarks. Preserve the existing Xe-LP driver architecture, AMFIAnchor security model and BSD-3-Clause licensing; independently implement ideas and review per-file license compatibility and attribution before incorporating any third-party code. Do not import Xe3 firmware, alternate accelerators, a fixed minimum clock or AMFI-disabling settings.
 
-### E6 — Metal 3 & Advanced Graphics
+### E6 — Metal 3 & Advanced Graphics (revised development sequence)
 
-The entire E6 milestone is dedicated to investigating genuine Metal 3 support on supported Xe-LP hardware, starting from the accepted E5 integration base. Preserve the existing Apple-driver architecture and Metal 2 functionality. Metal 3 is a research objective, not a compatibility promise; a changed System Information label or a positive family query alone does not establish support.
+Dedicate the whole generation to genuine Metal 3 research and advanced graphics on the existing Xe-LP architecture. Establish the accepted E5 integration baseline first. Preserve Metal 2 and never spoof capability flags or enable an unsupported path.
+
+| Module | Planned work and exit evidence |
+| --- | --- |
+| E6.1 — Capability baseline | Inventory Metal families, device identity, OS/driver/Graphics package versions, resource limits and feature queries; reproduce the E4/E5 baseline with explicit unknowns. |
+| E6.2 — Metal 3 feature mapping | Map applicable requirements against [Apple's Metal feature set tables](https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf); identify supported, missing, optional and unverified features and the owning driver layer. |
+| E6.3 — Graphics stack, ABI & provenance | Audit WhateverXe, TGLCompat, kernel accelerator, Metal bundle, compiler bridge and signing chain; pin donor identities, symbols, ABI contracts and reproducible permitted inputs. Establish feasibility of a separate Graphics Enhanced workstream before modifying signed payloads. |
+| E6.4 — Shader compiler compatibility | Investigate AIR/GPUCompiler, compiler adapter and Intel backend; validate shader stages, specialization and representative shader outputs; preserve backend identity and explicit failure paths. |
+| E6.5 — Advanced resource management | Investigate applicable argument-buffer tiers, resource binding, heaps, residency, texture aliasing, memory coherence and lifetime; add positive and negative tests. |
+| E6.6 — Advanced render pipeline | Validate applicable texture formats, compression, MSAA, blending, depth/stencil, tessellation and resource limits; distinguish hardware or API limitations from bugs. |
+| E6.7 — Commands, scheduling & synchronization | Investigate indirect commands, fences/events, hazards, queue ordering and resource lifetime; maintain bounded waits and recovery contracts. |
+| E6.8 — Framework & application compatibility | Investigate Metal Performance Shaders and MetalFX only where supported; exercise representative graphics/compute workloads and report optional feature support separately. |
+| E6.9 — Metal 3 validation suite | Add feature-specific workloads, deterministic output/readback checks, sustained stress, failure reporting and Metal 2 regressions. CI verifies host logic/builds; target GPU execution must be recorded separately. |
+| E6.10 — Experimental enablement & rollback | Enable a feature only on qualified configurations after its applicable requirements are demonstrated; retain the existing path elsewhere. If blocked, document missing requirements and preserve the verified Metal level. |
+
+Metal 3 acceptance requires evidence of the applicable family requirements and successful feature-specific hardware workloads, not simply a positive supportsFamily query. MetalFX and other optional capabilities are not assumed to be mandatory. Study [WhateverXe Graphics source/provenance notes](https://github.com/b00t0x/WhateverXe-Graphics/blob/v0.4.5/docs/SOURCES.md). Its package builder consumes premodified signed payloads; it is not a complete binary modification/signing pipeline. A Graphics Enhanced research workstream must first establish lawful inputs, per-file licensing, reproducible patch contracts and a validated trust chain. Do not change the original backend identity or weaken AMFIAnchor. MeowXE3 remains a comparative reference, not a replacement driver architecture.
+
+### E7 — Multimedia & Hardware Video Acceleration
 
 | Module | Planned work |
 | --- | --- |
-| E6.1 — Metal Capability Audit | Inventory Metal GPU families, feature queries, resource limits, driver identity and OS-dependent capabilities; establish a reproducible baseline. |
-| E6.2 — Metal 3 Feature Mapping | Compare the baseline against Apple's [Metal feature set tables](https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf); identify supported, missing and unverified requirements and their owning components. |
-| E6.3 — Shader Compiler Compatibility | Investigate AIR/GPUCompiler, the existing compiler adapter and Intel backend compatibility using representative shader compilation and execution checks; preserve donor identity and ABI guards. |
-| E6.4 — Advanced Resource Management | Investigate applicable argument-buffer, resource binding, texture, heap, residency and memory-coherence requirements; test valid and invalid inputs without inventing capabilities. |
-| E6.5 — GPU Command & Synchronization | Investigate applicable indirect-command, synchronization, scheduling and lifetime requirements; retain bounded waits and recovery contracts. |
-| E6.6 — Metal 3 Validation Suite | Add independent feature-specific workloads, output checks and Metal 2 regressions; distinguish optional features, API exposure and actual hardware execution. |
-| E6.7 — Experimental Metal 3 Enablement | Consider scoped capability enablement only after the applicable requirements are demonstrated. Keep unsupported configurations on their existing path and provide a tested rollback. |
+| E7.1 | Quick Sync/media-engine and VideoToolbox baseline, capability versus execution |
+| E7.2 | H.264 hardware decode and encode |
+| E7.3 | HEVC 8/10-bit hardware decode and encode where supported |
+| E7.4 | VP9 and AV1 decode feasibility; no promise of hardware AV1 encode on Xe-LP |
+| E7.5 | VA/AppleGVA integration, IOSurface, pixel formats, color conversion and scaling |
+| E7.6 | Safari, video playback, editing/export and sustained media workloads |
 
-Initial research and development will use GitHub Actions for compilation, CPU contracts, static checks and host-only diagnostic tests. Real Xe-LP execution and display testing are deferred until hardware becomes available; successful CI alone cannot establish Metal 3 compliance. Do not force `supportsFamily(.metal3)`, spoof feature flags, or advertise an unverified capability. If required support cannot be established, report the blocker and retain the existing Metal level.
+Require actual hardware-selected sessions, verified decoded/encoded outputs, and no unexplained software fallback; record unsupported codecs/profiles separately. DRM services are application/platform-dependent and not guaranteed. Reference [Intel media-driver](https://github.com/intel/media-driver) for hardware capabilities, not as a drop-in macOS driver.
 
-Study the [WhateverXe Graphics source/provenance notes](https://github.com/b00t0x/WhateverXe-Graphics/blob/v0.4.5/docs/SOURCES.md) alongside the kernel and compatibility layer. MeowXE3 is a comparative research reference only; native Vulkan/Metal translation remains outside the planned architecture. Changes to signed graphics payloads would require a separately validated build and trust chain; retain AMFIAnchor and respect third-party licensing.
+### E8 — Advanced macOS Graphics Integration
 
-### Subsequent milestones
+| Module | Planned work |
+| --- | --- |
+| E8.1 | OpenGL execution, correctness and application compatibility |
+| E8.2 | OpenCL GPU execution, kernels and verified output |
+| E8.3 | WindowServer, composition, frame pacing and application responsiveness |
+| E8.4 | eDP/HDMI/DP/USB-C display paths, brightness, HiDPI and multi-display |
+| E8.5 | Color management, supported formats and HDR where supported |
+| E8.6 | OS-specific ABI and Graphics payload compatibility, installation and upgrades |
 
-- **E7 — Hardware Video Acceleration:** real decode/encode validation and evidence-based multimedia improvements.
-- **E8 — Advanced macOS Compatibility:** OS-specific driver/compiler compatibility, installation and regression coverage.
-- **E9 — Hardware Specialization:** verified device-specific display, topology and power improvements without weakening existing hardware admission guards.
+Qualify each OS/build and connector combination independently. Existing upstream compatibility is not new Enhanced evidence. Do not promise unavailable ports or HDR/DRM features.
 
-These are planned milestones, not commitments to new GPU architectures or unverified feature support.
+### E9 — Hardware Optimization & Reliability
+
+| Module | Planned work |
+| --- | --- |
+| E9.1 | GGTT/PPGTT, resource lifetime, eviction and memory pressure |
+| E9.2 | URB/cache and topology audits; device-specific limits |
+| E9.3 | GPU scheduling, preemption, queue fairness and latency |
+| E9.4 | RPS, RC6, ForceWake, display power and verified efficiency |
+| E9.5 | Hang detection, bounded reset, display recovery and sleep/wake |
+| E9.6 | Device-specific quirks, supported PCI IDs, regression and comparative benchmarks |
+
+Optimize only after reproducible measurements; no unsafe clock forcing, indiscriminate MMIO or unsupported identity overrides. Compare equivalent workload, OS, power and display configurations. Separate GPU/package energy from whole-system battery consumption.
+
+### E10 — Full Xe-LP Graphics Qualification
+
+| Module | Planned work |
+| --- | --- |
+| E10.1 | Per-device/OS feature matrix: verified, limited, unsupported, not tested |
+| E10.2 | Sustained graphics, compute, media and mixed-workload stress with output checks |
+| E10.3 | Display/audio hotplug, multi-display, suspend/resume, recovery and internal audio regressions |
+| E10.4 | Controlled upstream/E4/Enhanced comparisons; performance, stability and power evidence |
+| E10.5 | Reproducible artifacts, ABI/security review, installation/rollback, documentation and community qualification |
+
+A CI-approved build is experimental until qualified on real supported hardware. Stable qualification is configuration-specific and requires evidence of the supported feature set, no unresolved release-blocking regressions, repeatable results and a recovery path. Do not claim universal Intel Xe-LP support, Metal 3 compliance, native parity, or performance gains without evidence. Unsupported hardware capabilities remain out of scope.
 
 ### Community testing
 
