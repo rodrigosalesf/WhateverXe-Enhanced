@@ -276,7 +276,7 @@ These are synthetic allocation graphs and registry text, not live ownership
 evidence.
 Observed bytes do not establish physical residency, GART usage or complete
 per-process VRAM; shared bytes are not duplicated in exclusive totals.
-The optional macOS collector samples `ioreg -l -w0 -p IOService` without
+The optional macOS collector samples `ioreg -r -c IOAccelerator -d 1 -l -w0` without
 changing system state. For example, `python3 tools/gpu_memory_probe.py
 --collect-duration 600 --interval 5 --output memory-series.json` captures
 for ten minutes. It discards the raw registry dump and writes only UTC/elapsed

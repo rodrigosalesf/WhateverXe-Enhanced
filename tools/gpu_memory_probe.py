@@ -258,7 +258,7 @@ def collect_registry_series(duration_seconds, interval_seconds, run_capture=subp
                 sleep(remaining / 1_000_000_000)
         text = None
         try:
-            result = run_capture(["ioreg", "-l", "-w0", "-p", "IOService"],
+            result = run_capture(["/usr/sbin/ioreg", "-r", "-c", "IOAccelerator", "-d", "1", "-l", "-w0"],
                                  capture_output=True, text=True, check=True, timeout=15)
             if isinstance(result.stdout, str) and len(result.stdout) <= MAX_INPUT:
                 text = result.stdout

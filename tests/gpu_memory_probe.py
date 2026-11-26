@@ -92,7 +92,7 @@ class MemoryTests(unittest.TestCase):
                                                monotonic_ns=clock.monotonic_ns,
                                                utc_now=lambda: next(timestamps))
         self.assertEqual(len(calls), 3)
-        self.assertEqual(calls[0][0], ["ioreg", "-l", "-w0", "-p", "IOService"])
+        self.assertEqual(calls[0][0], ["/usr/sbin/ioreg", "-r", "-c", "IOAccelerator", "-d", "1", "-l", "-w0"])
         self.assertTrue(calls[0][1]["check"])
         self.assertEqual([sample["capture_status"] for sample in result["samples"]],
                          ["ok", "capture-failed", "ok"])
