@@ -248,29 +248,41 @@ def collect_registry_series(duration_seconds, interval_seconds, run_capture=subp
     if (type(duration_seconds) is not int or not 2 <= duration_seconds <= 3600 or
             type(interval_seconds) is not int or not 1 <= interval_seconds <= 300):
         raise ValueError("invalid collection bounds")
-    sample_count = duration_seconds // interval_seconds + 1
+    # The deadline is exclusive for capture starts.
+    sample_count = (duration_seconds + interval_seconds - 1) // interval_seconds
     if sample_count > MAX_SERIES_SAMPLES:
         raise ValueError("too many collection samples")
     start = monotonic_ns()
     interval_ns = interval_seconds * 1_000_000_000
+    deadline = start + duration_seconds * 1_000_000_000
 
     def captures():
         for index in range(sample_count):
             target = start + index * interval_ns
-            if index:
-                remaining = target - monotonic_ns()
-                if remaining > 0:
-                    sleep(remaining / 1_000_000_000)
+            now = monotonic_ns()
+            if now >= deadline:
+                break
+            if target > now:
+                sleep((target - now) / 1_000_000_000)
+            remaining_ns = deadline - monotonic_ns()
+            if remaining_ns <= 0:
+                break
             text = None
             try:
                 result = run_capture(["/usr/sbin/ioreg", "-r", "-c", "IOAccelerator", "-d", "1", "-l", "-w0"],
-                                     capture_output=True, text=True, check=True, timeout=15)
+                                     capture_output=True, text=True, check=True,
+                                     timeout=min(15, remaining_ns / 1_000_000_000))
                 if isinstance(result.stdout, str) and len(result.stdout) <= MAX_INPUT:
                     text = result.stdout
             except (OSError, subprocess.SubprocessError, UnicodeError):
                 pass
-            yield {"elapsed_ns": monotonic_ns() - start,
-                             "captured_at_utc": utc_now(), "registry_text": text}
+            finished = monotonic_ns()
+            # Spawn/cleanup overhead may outlast the subprocess timeout.
+            # Keep the true timestamp, but do not accept late observations.
+            if finished > deadline:
+                text = None
+            yield {"elapsed_ns": finished - start,
+                   "captured_at_utc": utc_now(), "registry_text": text}
     return analyze_registry_series(captures())
 
 

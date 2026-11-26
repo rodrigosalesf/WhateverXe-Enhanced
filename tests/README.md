@@ -269,7 +269,7 @@ and links, invalid schemas, excessive input and aggregate overflow fail
 closed. Invalid byte sizes are counted separately. Client IDs are replaced
 by local ordinals in the report; these are not stable across captures.
 
-Sixteen host-only tests exercise the actual accounting, registry parser,
+Twenty host-only tests exercise the actual accounting, registry parser,
 time-series analyzer and CLI, including conflicts, missing links, shared
 allocations, duplicate observations, failed captures, bounds and redaction.
 These are synthetic allocation graphs and registry text, not live ownership
@@ -279,7 +279,11 @@ per-process VRAM; shared bytes are not duplicated in exclusive totals.
 The optional macOS collector samples `ioreg -r -c IOAccelerator -d 1 -l -w0` without
 changing system state. For example, `python3 tools/gpu_memory_probe.py
 --collect-duration 600 --interval 5 --output memory-series.json` captures
-for ten minutes. It discards the raw registry dump and writes only UTC/elapsed
+with a ten-minute monotonic capture budget (no new capture starts at or after
+its deadline; each subprocess timeout is capped by the remaining budget and 15 s).
+Late results become gaps. OS process creation/cleanup, scheduling and final JSON
+serialization may exceed the nominal duration; this is not a hard real-time
+process deadline. It discards the raw registry dump and writes only UTC/elapsed
 capture times and matching counter values. A delta is calculated only between
 adjacent successful samples with exactly one valid occurrence per capture;
 duplicate matches, high-bit values, missing properties and failed captures

@@ -101,7 +101,7 @@ class MemoryTests(unittest.TestCase):
 
         timestamps = iter(("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:01+00:00",
                            "2026-01-01T00:00:02+00:00"))
-        result = probe.collect_registry_series(2, 1, run_capture=run, sleep=clock.sleep,
+        result = probe.collect_registry_series(3, 1, run_capture=run, sleep=clock.sleep,
                                                monotonic_ns=clock.monotonic_ns,
                                                utc_now=lambda: next(timestamps))
         self.assertEqual(len(calls), 3)
@@ -112,6 +112,84 @@ class MemoryTests(unittest.TestCase):
         self.assertIsNone(result["samples"][1]["counters"])
         self.assertEqual([sample["elapsed_ns"] for sample in result["samples"]],
                          [0, 1_000_000_000, 2_000_000_000])
+
+    def test_collection_budget_limits_timeouts_and_stops_at_deadline(self):
+        elapsed = 0
+        timeouts = []
+
+        def sleep(seconds):
+            nonlocal elapsed
+            elapsed += round(seconds * 1_000_000_000)
+
+        def run(command, **kwargs):
+            timeout = kwargs["timeout"]
+            timeouts.append(timeout)
+            sleep(timeout)
+            raise subprocess.TimeoutExpired(command, timeout)
+
+        report = probe.collect_registry_series(
+            17, 1, run_capture=run, sleep=sleep, monotonic_ns=lambda: elapsed,
+            utc_now=lambda: "2026-01-01T00:00:00+00:00")
+        self.assertEqual(timeouts, [15, 2])
+        self.assertEqual([x["elapsed_ns"] for x in report["samples"]],
+                         [15_000_000_000, 17_000_000_000])
+        self.assertTrue(all(x["capture_status"] == "capture-failed"
+                            for x in report["samples"]))
+
+    def test_collection_does_not_start_at_exact_deadline(self):
+        elapsed = 0
+        calls = []
+
+        def sleep(seconds):
+            nonlocal elapsed
+            elapsed += round(seconds * 1_000_000_000)
+
+        def run(command, **kwargs):
+            calls.append(kwargs["timeout"])
+            return subprocess.CompletedProcess(command, 0, '"inUseSysMemoryBytes"=1')
+
+        report = probe.collect_registry_series(
+            2, 1, run_capture=run, sleep=sleep, monotonic_ns=lambda: elapsed,
+            utc_now=lambda: "2026-01-01T00:00:00+00:00")
+        self.assertEqual(calls, [2, 1])
+        self.assertEqual([x["elapsed_ns"] for x in report["samples"]],
+                         [0, 1_000_000_000])
+
+    def test_collection_late_result_is_gap_and_no_further_capture(self):
+        elapsed = 0
+        calls = []
+
+        def run(command, **kwargs):
+            nonlocal elapsed
+            calls.append(kwargs["timeout"])
+            elapsed = 2_500_000_000
+            return subprocess.CompletedProcess(command, 0, '"inUseSysMemoryBytes"=1')
+
+        report = probe.collect_registry_series(
+            2, 1, run_capture=run, monotonic_ns=lambda: elapsed,
+            utc_now=lambda: "2026-01-01T00:00:00+00:00")
+        self.assertEqual(calls, [2])
+        self.assertEqual(report["samples"][0]["elapsed_ns"], 2_500_000_000)
+        self.assertEqual(report["samples"][0]["capture_status"], "capture-failed")
+        self.assertIsNone(report["samples"][0]["counters"])
+
+    def test_collection_checks_deadline_again_after_sleep(self):
+        elapsed = 0
+        calls = []
+
+        def sleep(seconds):
+            nonlocal elapsed
+            elapsed = 2_100_000_000
+
+        def run(command, **kwargs):
+            calls.append(kwargs["timeout"])
+            return subprocess.CompletedProcess(command, 0, '"inUseSysMemoryBytes"=1')
+
+        report = probe.collect_registry_series(
+            2, 1, run_capture=run, sleep=sleep, monotonic_ns=lambda: elapsed,
+            utc_now=lambda: "2026-01-01T00:00:00+00:00")
+        self.assertEqual(calls, [2])
+        self.assertEqual(len(report["samples"]), 1)
 
     def test_partition_no_double_count(self):
         r = probe.analyze(snapshot())
