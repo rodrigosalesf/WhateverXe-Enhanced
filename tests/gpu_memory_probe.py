@@ -54,6 +54,19 @@ class MemoryTests(unittest.TestCase):
                          "missing-observation")
         self.assertNotIn("registry_text", json.dumps(report))
 
+    def test_series_consumes_snapshots_before_requesting_the_next(self):
+        # A producer may reuse its record after the consumer requests more data.
+        def captures():
+            row = {"elapsed_ns": 0, "captured_at_utc": "2026-01-01T00:00:00+00:00",
+                   "registry_text": '"inUseSysMemoryBytes"=12'}
+            yield row
+            row.update(elapsed_ns=1, registry_text='"inUseSysMemoryBytes"=16')
+            yield row
+
+        report = probe.analyze_registry_series(captures())
+        counter = report["samples"][1]["counters"]["inUseSysMemoryBytes"]
+        self.assertEqual(counter["delta_from_previous"]["bytes"], 4)
+
     def test_registry_series_rejects_nonmonotonic_and_malformed_samples(self):
         valid = {"elapsed_ns": 0, "captured_at_utc": "2026-01-01T00:00:00+00:00",
                  "registry_text": '"inUseSysMemoryBytes"=100'}

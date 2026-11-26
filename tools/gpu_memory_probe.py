@@ -170,12 +170,14 @@ def analyze_registry_text(snapshot):
 
 def analyze_registry_series(samples):
     """Analyze ordered, timestamped raw captures without inferring device identity."""
-    if not isinstance(samples, list) or not 1 <= len(samples) <= MAX_SERIES_SAMPLES:
+    if isinstance(samples, (str, bytes, dict)) or not hasattr(samples, "__iter__"):
         raise ValueError("invalid registry series")
     report_samples = []
     previous = None
     previous_elapsed = -1
     for sample in samples:
+        if len(report_samples) >= MAX_SERIES_SAMPLES:
+            raise ValueError("too many registry samples")
         if (not isinstance(sample, dict) or
                 set(sample) != {"elapsed_ns", "captured_at_utc", "registry_text"}):
             raise ValueError("invalid registry sample")
@@ -225,6 +227,8 @@ def analyze_registry_series(samples):
         report_samples.append(item)
         previous = item
         previous_elapsed = elapsed
+    if not report_samples:
+        raise ValueError("empty registry series")
     return {"schema": "wex-memory-registry-series-v1", "samples": report_samples,
             "limitations": [
                 "Only exact counter values and capture timing are retained; raw IORegistry text is discarded.",
@@ -249,24 +253,25 @@ def collect_registry_series(duration_seconds, interval_seconds, run_capture=subp
         raise ValueError("too many collection samples")
     start = monotonic_ns()
     interval_ns = interval_seconds * 1_000_000_000
-    captures = []
-    for index in range(sample_count):
-        target = start + index * interval_ns
-        if index:
-            remaining = target - monotonic_ns()
-            if remaining > 0:
-                sleep(remaining / 1_000_000_000)
-        text = None
-        try:
-            result = run_capture(["/usr/sbin/ioreg", "-r", "-c", "IOAccelerator", "-d", "1", "-l", "-w0"],
-                                 capture_output=True, text=True, check=True, timeout=15)
-            if isinstance(result.stdout, str) and len(result.stdout) <= MAX_INPUT:
-                text = result.stdout
-        except (OSError, subprocess.SubprocessError, UnicodeError):
-            pass
-        captures.append({"elapsed_ns": monotonic_ns() - start,
-                         "captured_at_utc": utc_now(), "registry_text": text})
-    return analyze_registry_series(captures)
+
+    def captures():
+        for index in range(sample_count):
+            target = start + index * interval_ns
+            if index:
+                remaining = target - monotonic_ns()
+                if remaining > 0:
+                    sleep(remaining / 1_000_000_000)
+            text = None
+            try:
+                result = run_capture(["/usr/sbin/ioreg", "-r", "-c", "IOAccelerator", "-d", "1", "-l", "-w0"],
+                                     capture_output=True, text=True, check=True, timeout=15)
+                if isinstance(result.stdout, str) and len(result.stdout) <= MAX_INPUT:
+                    text = result.stdout
+            except (OSError, subprocess.SubprocessError, UnicodeError):
+                pass
+            yield {"elapsed_ns": monotonic_ns() - start,
+                             "captured_at_utc": utc_now(), "registry_text": text}
+    return analyze_registry_series(captures())
 
 
 def main():

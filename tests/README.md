@@ -269,7 +269,7 @@ and links, invalid schemas, excessive input and aggregate overflow fail
 closed. Invalid byte sizes are counted separately. Client IDs are replaced
 by local ordinals in the report; these are not stable across captures.
 
-Fifteen host-only tests exercise the actual accounting, registry parser,
+Sixteen host-only tests exercise the actual accounting, registry parser,
 time-series analyzer and CLI, including conflicts, missing links, shared
 allocations, duplicate observations, failed captures, bounds and redaction.
 These are synthetic allocation graphs and registry text, not live ownership
