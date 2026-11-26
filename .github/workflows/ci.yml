@@ -41,8 +41,49 @@ jobs:
           mkdir -p Lilu.kext/Contents/Resources
           ln -s "$GITHUB_WORKSPACE/build/dependencies/Lilu/Lilu/Headers" Lilu.kext/Contents/Resources/Headers
           ln -s "$GITHUB_WORKSPACE/build/dependencies/Lilu/Lilu/Library" Lilu.kext/Contents/Resources/Library
+      - name: Quality Gate - Python and workflow lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv build/quality-venv
+          build/quality-venv/bin/python -m pip install --disable-pip-version-check --only-binary=:all: --no-deps ruff==0.11.13
+          build/quality-venv/bin/ruff --version
+          for module in hdmi_audio_probe hdmi_hotplug_replay gpu_telemetry_probe gpu_frequency_probe gpu_rc6_probe display_power_probe frame_pacing_probe gpu_memory_probe install_preflight; do
+            build/quality-venv/bin/ruff check "tools/$module.py" "tests/$module.py"
+          done
+          build/quality-venv/bin/ruff check tests/xelp_flight_recorder_mutants.py
+          mkdir -p build/quality-bin
+          # Use the exact upstream Intel macOS release instead of assuming Go is installed.
+          archive=build/quality-bin/actionlint.tar.gz
+          curl --fail --location --silent --show-error --retry 3 --output "$archive" https://github.com/rhysd/actionlint/releases/download/v1.7.11/actionlint_1.7.11_darwin_amd64.tar.gz
+          printf '%s  %s\n' '17ffc17fed8f0258ef6ad4aed932d3272464c7ef7d64e1cb0d65aa97c9752107' "$archive" | shasum -a 256 -c -
+          tar -xzf "$archive" -C build/quality-bin actionlint
+          build/quality-bin/actionlint -version
+          build/quality-bin/actionlint -shellcheck= -pyflakes= .github/workflows/ci.yml
+      - name: Quality Gate - C++ host analysis
+        shell: bash
+        run: |
+          set -euo pipefail
+          tidy="$(brew --prefix llvm@18)/bin/clang-tidy"
+          "$tidy" --version
+          sdk="$(xcrun --sdk macosx --show-sdk-path)"
+          "$tidy" tests/xelp_flight_recorder.cpp -- -std=c++17 -isysroot "$sdk"
+          xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -fsyntax-only tests/xelp_flight_recorder.cpp
       - name: CPU tests
-        run: python3 tools/test.py
+        run: >-
+          python3 tools/test.py
+          --require hdmi_audio_probe
+          --require hdmi_hotplug_replay
+          --require gpu_telemetry_probe
+          --require gpu_frequency_probe
+          --require gpu_rc6_probe
+          --require display_power_probe
+          --require display13_shared_restore
+          --require frame_pacing_probe
+          --require gpu_memory_probe
+          --require xelp_flight_recorder
+          --require xelp_flight_recorder_mutants
+          --require install_preflight
       - name: Compile Metal diagnostics (no GPU execution on CI)
         run: |
           mkdir -p build/diagnostics

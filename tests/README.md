@@ -313,6 +313,30 @@ payload, hardware identity and DVMT. Existing build-time Compat ABI/export
 checks, x86_64 packaging and dSYM UUID checks remain mandatory and unchanged.
 No new native ABI support or hardware bootability is established.
 
+### Enhanced quality gate (initial scoped baseline)
+
+The mandatory `Test and build` job runs Ruff 0.11.13 (F63/F7/F82: selected
+Pyflakes correctness rules) on E5 Python probes and tests, actionlint 1.7.11
+on ci.yml (workflow validation only; external shellcheck/pyflakes integrations
+disabled), and the runner's Homebrew LLVM 18 Clang-Tidy on
+tests/xelp_flight_recorder.cpp, including the recorder header. Clang-Tidy
+uses the checked-in analyzer/bugprone subset with warnings as errors;
+the same host fixture is compiled with strict warnings. Configuration files
+provide formatting defaults; whole-tree formatting is not enforced or
+applied automatically. Extend the scoped checks as new code is introduced.
+The runner image is not a pinned compiler build; log actual tool versions.
+
+The CPU test runner still executes its full default suite and explicitly
+requires every E5 registered CPU contract (including shared restoration,
+flight-recorder semantic mutants and installation preflight). Existing
+ASan/UBSan host fixtures, Metal Swift compilation and self-test, DEBUG/RELEASE
+builds, Compat ABI/export checks and packaging checks are retained.
+Optional native donor modes still require exact inputs and report omissions.
+The initial quality gate neither statically analyzes the complete kernel nor
+validates Swift style, hardware behavior, native ABI execution or Metal 3.
+Do not claim CodeQL, SwiftLint, Cppcheck, or other tooling is enabled until
+its own configured workflow actually executes.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched

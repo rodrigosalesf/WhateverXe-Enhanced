@@ -1,0 +1,12 @@
+# Initial E5 quality baseline. Broaden the mandatory rules after reviewing
+# legacy findings; do not apply automatic fixes to kernel-adjacent code.
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["F63", "F7", "F82"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
