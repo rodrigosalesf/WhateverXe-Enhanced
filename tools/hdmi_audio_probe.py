@@ -222,10 +222,15 @@ def registry_class(cls, run=command):
         class_codes = [numeric_property(node.get("class-code")) for node in decoded]
         class_codes = [code for code in class_codes if code is not None]
         result["pci_class_code_observations"] = len(class_codes)
-        result["pci_audio_class_candidates"] = sum(
-            1 for code in class_codes
-            if ((code >> 16) & 0xffff == 0x0403
-                or (code >> 8) & 0xffff == 0x0403))
+        for subclass, label in ((0x0401, "pci_dsp_audio_class_candidates"),
+                                (0x0403, "pci_hda_class_candidates")):
+            result[label] = sum(
+                1 for code in class_codes
+                if (((code >> 16) & 0xffff) == subclass
+                    or ((code >> 8) & 0xffff) == subclass))
+        result["pci_audio_class_candidates"] = (
+            result["pci_dsp_audio_class_candidates"] +
+            result["pci_hda_class_candidates"])
         result["pci_audio_class_status"] = "observed" if class_codes else "unavailable"
         result["nodes"] = []  # PCI enumeration is summarized; device inventory is not emitted.
     return result

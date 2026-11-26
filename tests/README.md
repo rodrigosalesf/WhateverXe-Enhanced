@@ -84,8 +84,9 @@ hardware playback test.
 
 On macOS run `python3 tools/hdmi_audio_probe.py` for a read-only JSON snapshot.
 It reports selected properties and counts rather than raw EDID, device names,
-serials or machine identifiers. The snapshot includes PCI audio-class candidate
-counts and compares `hda-gfx` values on `AppleIntelFramebuffer`,
+serials or machine identifiers. The snapshot counts PCI multimedia-audio
+controllers (class 0401) and high-definition audio controllers (class 0403)
+separately, and compares `hda-gfx` values on `AppleIntelFramebuffer`,
 `AppleHDAController` and `AppleGFXHDA` services. The values themselves are
 never emitted. The HDA `status-mask` is also reported with its set bit positions,
 beside observed codec addresses and vendor IDs; these registry properties alone
