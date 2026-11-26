@@ -62,6 +62,8 @@ class RC6Tests(unittest.TestCase):
             self.assertEqual(probe.decode(pair(12, 12, elapsed))["status"],
                              "ambiguous-wrap-window")
         self.assertEqual(probe.decode(pair(12, 12, wrap_ns - 1))["status"],
+                         "ambiguous-wrap-window")
+        self.assertEqual(probe.decode(pair(12, 12, wrap_ns - 1281))["status"],
                          "conditional-delta")
 
     def test_quantization_and_impossible_delta(self):
