@@ -12,15 +12,18 @@ U64_MAX = (1 << 64) - 1
 # Exact observed driver keys only. Unknown fields and registry identity are omitted.
 FIELDS = {
     "Device Utilization %": "percent",
-    "GPU Activity(%)": "percent",
-    "GPU Busy(%)": "percent",
-    "Current Performance State": "opaque",
-    "GPU Core Clock": "opaque",
-    "GPU Frequency": "opaque",
+    "Device Utilization % at cur p-state": "percent",
+    **{f"Device Unit {i} Utilization %": "percent" for i in range(6)},
+    "textureCount": "counter",
+    "context2DCount": "counter",
+    "contextVideoCount": "counter",
     "agpTextureCreationBytes": "texture-bytes",
-    "gartSize": "bytes",
-    "gartUsed": "bytes",
-    "gartCacheSize": "bytes",
+    "gartSizeBytes": "bytes",
+    "gartUsedBytes": "bytes",
+    "gartCacheBytes": "bytes",
+    "gartFreeBytes": "bytes",
+    "agpTextureCreationCount": "counter",
+    "iosurfaceTextureCreationCount": "counter",
     "recoveryCount": "counter",
 }
 
@@ -44,7 +47,7 @@ def summarize(stats):
         return {"status": "unavailable"}
     fields = {key: classify(stats[key], kind) if key in stats else {"status": "missing"}
               for key, kind in FIELDS.items()}
-    size, used = fields["gartSize"], fields["gartUsed"]
+    size, used = fields["gartSizeBytes"], fields["gartUsedBytes"]
     relation = "unavailable"
     if size["status"] in ("observed", "observed-zero") and used["status"] in ("observed", "observed-zero"):
         # Report a relationship, not physical memory corruption or VRAM capacity.
