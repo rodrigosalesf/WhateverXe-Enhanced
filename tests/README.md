@@ -213,6 +213,26 @@ compliance. CI compiles the Swift program and exercises host-only expected
 values, timing and invalid/duplicate CLI arguments. MSL runtime compilation,
 GPU execution and resource compatibility remain deferred to real hardware.
 
+### E5.9 frame pacing diagnostics
+
+Run `python3 tools/test.py --only frame_pacing_probe --require frame_pacing_probe`.
+The offline analyzer `python3 tools/frame_pacing_probe.py trace.json` accepts
+one continuous trace with explicit source (presentation, vblank, or synthetic),
+a rational nominal refresh rate and strictly increasing integer nanosecond
+timestamps. Example synthetic input:
+`{"source":"synthetic","refresh":{"numerator":60,"denominator":1},"timestamps_ns":[0,16666667,33333334,66666668]}`.
+It reports event cadence, minimum/median/nearest-rank P95/maximum intervals,
+and the fraction of intervals strictly longer than 1.5 nominal periods.
+Integer arithmetic preserves fractional refresh thresholds (e.g. 60000/1001 Hz).
+An optional `--reference baseline.json` compares matching source and nominal
+refresh; equivalent capture conditions and workloads are not established.
+The nine host-only test methods cover literal statistics, fractional thresholds,
+large timestamp origins, invalid inputs, comparison and bounded CLI.
+No live capture, variable-refresh interpretation, presentation hooks, actual
+dropped-frame counts or performance gains are claimed. VBlank cadence is not
+application FPS; Metal command-buffer timing must not be used as presentation
+timing. Raw timestamps and unrelated metadata are not exported.
+
 ## Maintaining test contracts
 
 `tgl_recovery` runs the production wrapper and helper against ABI-matched
