@@ -11,6 +11,14 @@ int main() {
     assert(out.address == 2 && out.pin == 4 && out.converter == 3);
     w[0].count = 2;
     assert(!select(c,2,1,0x8086281C,4,out));
+    w[0].selectionKnown = true;
+    w[0].selectedIndex = 1;
+    assert(select(c,2,1,0x8086281C,4,out) && out.converter == 5);
+    w[0].selectedIndex = 2;
+    assert(!select(c,2,1,0x8086281C,4,out));
+    w[0].selectedIndex = 0;
+    assert(select(c,2,1,0x8086281C,4,out) && out.converter == 3);
+    w[0].selectionKnown = false;
     w[0].count = 1;
     assert(!select(c,2,2,0x8086281C,4,out));
     assert(!select(c,2,1,0x10EC0256,4,out));
