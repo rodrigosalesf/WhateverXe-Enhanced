@@ -59,6 +59,26 @@ int main() {
     edid[133] = 0x11; // non-LPCM descriptor, despite Basic Audio
     checksum(edid + 128);
     assert(!buildEld(edid, 256).length);
+    // Reserved bits or empty rate/depth fields in LPCM are invalid.
+    const uint8_t invalidLpcm[][3] {
+        {0x89, 7, 1}, {9, 0x87, 1}, {9, 7, 0x81},
+        {9, 0, 1}, {9, 7, 0}
+    };
+    for (const auto &sad : invalidLpcm) {
+        fixture(edid);
+        memcpy(edid + 133, sad, sizeof(sad));
+        checksum(edid + 128);
+        assert(!buildEld(edid, 256).length);
+    }
+    fixture(edid);
+    edid[133] = 8; // mono LPCM does not qualify for stereo preparation
+    checksum(edid + 128);
+    assert(!buildEld(edid, 256).length);
+    fixture(edid);
+    edid[135] = 4; // valid 24-bit LPCM remains admissible
+    checksum(edid + 128);
+    assert(buildEld(edid, 256).length == sizeof(expected));
+
     fixture(edid);
     edid[132] = 0x22; // malformed two-byte SAD
     checksum(edid + 128);

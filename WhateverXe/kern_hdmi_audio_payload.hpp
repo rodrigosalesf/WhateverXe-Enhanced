@@ -62,9 +62,14 @@ inline Eld buildEld(const uint8_t *edid, size_t size) {
                     return {};
                 for (unsigned j = 0; j < len; j += 3) {
                     const auto *d = cta + i + j;
-                    pcm = pcm || (((d[0] >> 3) & 15U) == 1 &&
-                                  (d[0] & 7U) >= 1 && (d[1] & 0x7fU) &&
-                                  (d[2] & 7U));
+                    // Reject reserved bits or empty capabilities in LPCM SADs.
+                    // A malformed descriptor must not become positive ELD evidence.
+                    if (((d[0] >> 3) & 15U) == 1) {
+                        if ((d[0] & 0x80U) || (d[1] & 0x80U) ||
+                            (d[2] & 0xf8U) || !(d[1] & 0x7fU) || !(d[2] & 7U))
+                            return {};
+                        pcm = pcm || (d[0] & 7U) >= 1;
+                    }
                     for (unsigned k = 0; k < 3; ++k)
                         sad[count * 3 + k] = d[k];
                     ++count;
