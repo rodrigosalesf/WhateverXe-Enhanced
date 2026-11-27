@@ -134,6 +134,48 @@ inline InfoFrame stereoInfoFrame(unsigned channels) {
     result.length = sizeof(result.bytes);
     return result;
 }
+// Require an explicit stereo LPCM rate/depth pair in ONE valid ELD SAD.
+// This checks the supplied payload, not monitor presence or a live codec.
+inline bool supportsStereoPcm(const Eld &eld, unsigned rate, unsigned bits) {
+    if (eld.length < 20 || eld.length > sizeof(eld.bytes) ||
+        (eld.length & 3U) || (eld.bytes[0] >> 3) != 2 ||
+        size_t(eld.bytes[2]) * 4 + 4 != eld.length ||
+        ((eld.bytes[5] >> 2) & 3U) != 0)
+        return false;
+    const unsigned name = eld.bytes[4] & 31U;
+    const unsigned count = eld.bytes[5] >> 4;
+    const unsigned start = 20 + name;
+    if (name > 16 || start + count * 3 > eld.length)
+        return false;
+    constexpr unsigned rates[] {32000, 44100, 48000, 88200, 96000, 176400, 192000};
+    unsigned rateMask = 0;
+    for (unsigned i = 0; i < 7; ++i)
+        if (rates[i] == rate)
+            rateMask = 1U << i;
+    const unsigned depthMask = bits == 16 ? 1U : bits == 20 ? 2U : bits == 24 ? 4U : 0U;
+    if (!rateMask || !depthMask)
+        return false;
+    bool supported = false;
+    for (unsigned i = 0; i < count; ++i) {
+        const auto *d = eld.bytes + start + i * 3;
+        if (((d[0] >> 3) & 15U) != 1)
+            continue;
+        if ((d[0] & 0x80U) || (d[1] & 0x80U) || (d[2] & 0xf8U) ||
+            !(d[1] & 0x7fU) || !(d[2] & 7U))
+            return false;
+        if ((d[0] & 7U) >= 1 && (d[1] & rateMask) && (d[2] & depthMask))
+            supported = true;
+    }
+    return supported;
+}
+
+inline InfoFrame prepareStereoPcmInfoFrame(const Eld &eld, unsigned rate,
+                                           unsigned bits, unsigned channels) {
+    if (channels != 2 || !supportsStereoPcm(eld, rate, bits))
+        return {};
+    return stereoInfoFrame(channels);
+}
+
 // Offline admission model, not a hardware discovery or write interface.
 // IDs and connection epochs must come from a separately verified mapping.
 // A vendor ID alone, enumeration order or equal hda-gfx is not that mapping.

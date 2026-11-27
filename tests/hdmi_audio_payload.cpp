@@ -109,6 +109,41 @@ int main() {
     for (unsigned channels = 0; channels <= 16; ++channels)
         if (channels != 2)
             assert(!stereoInfoFrame(channels).length);
+    // Stream parameters must be supported by a single valid LPCM SAD.
+    assert(prepareStereoPcmInfoFrame(e, 48000, 16, 2).length == sizeof(packet));
+    assert(!prepareStereoPcmInfoFrame(e, 96000, 16, 2).length);
+    assert(!prepareStereoPcmInfoFrame(e, 48000, 24, 2).length);
+    assert(!prepareStereoPcmInfoFrame(e, 48000, 16, 6).length);
+    assert(!prepareStereoPcmInfoFrame(e, 48000, 32, 2).length);
+    Eld invalid = e;
+    invalid.bytes[5] |= 4; // DP instead of HDMI.
+    assert(!supportsStereoPcm(invalid, 48000, 16));
+    invalid = e;
+    invalid.bytes[2] -= 1;
+    assert(!supportsStereoPcm(invalid, 48000, 16));
+    invalid = e;
+    invalid.bytes[5] = 0xf0; // SAD list exceeds baseline.
+    assert(!supportsStereoPcm(invalid, 48000, 16));
+    invalid = e;
+    invalid.length = 85;
+    assert(!supportsStereoPcm(invalid, 48000, 16));
+
+    // Two SADs: 44.1 kHz/16-bit, 48 kHz/24-bit. Never combine fields.
+    Eld split {};
+    split.length = 28;
+    split.bytes[0] = 0x10;
+    split.bytes[2] = 6;
+    split.bytes[4] = 0x60;
+    split.bytes[5] = 0x20;
+    const uint8_t splitSads[] {9, 2, 1, 9, 4, 4};
+    memcpy(split.bytes + 20, splitSads, sizeof(splitSads));
+    assert(supportsStereoPcm(split, 44100, 16));
+    assert(supportsStereoPcm(split, 48000, 24));
+    assert(!supportsStereoPcm(split, 48000, 16));
+    assert(!supportsStereoPcm(split, 44100, 24));
+    split.bytes[25] = 0x84; // Malformed later LPCM invalidates prior evidence.
+    assert(!supportsStereoPcm(split, 44100, 16));
+
     // Synthetic IDs only: no claim that these describe the Acer.
     const RouteEvidence route {1, 7, 3, 0x8086281c, 2, 1, true, true, true};
     RouteEvidence candidates[] {route, route};
