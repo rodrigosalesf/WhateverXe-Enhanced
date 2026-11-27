@@ -30,6 +30,12 @@ FRAMEBUFFER = {
     "__ZN21AppleIntelFramebuffer13fbGetDDCBlockEjPhPyjP21AppleIntelDisplayPath": None,
     "__ZN21AppleIntelFramebuffer18setAudioPropertiesEv": None,
     "__ZN21AppleIntelFramebuffer21setupDisplayResourcesEv": None,
+    # Exact symbols observed in CI 107; presence is not ABI qualification.
+    "__ZN31AppleIntelFramebufferController13hwEnableAudioEP21AppleIntelFramebufferP21AppleIntelDisplayPath": None,
+    "__ZN31AppleIntelFramebufferController14hwDisableAudioEP21AppleIntelFramebufferP21AppleIntelDisplayPath": None,
+    "__ZN31AppleIntelFramebufferController20hwDisableAudioBufferEv": None,
+    "__ZN19AppleIntelPowerWell21hwSetPowerWellStatePGEbj": None,
+    "__ZN19AppleIntelPowerWell22restorePowerWellsStateEb": None,
 }
 MAX_IMAGE = 128 * 1024 * 1024
 
