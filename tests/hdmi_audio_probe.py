@@ -156,6 +156,20 @@ class ProbeTests(unittest.TestCase):
             [], [], {"gpu": "observed", "hda": "invalid-response"})
         self.assertEqual(unavailable["status"], "incomplete")
 
+    def test_binary_hda_gfx_values_compare_without_emitting_bytes(self):
+        secret = bytes((0x00, 0xff, 0x17))
+        token = probe.hda_gfx_value({"hda-gfx": secret})
+        self.assertEqual(token, secret)
+        shared = probe.hda_gfx_association(
+            [token], [secret], {"gpu": "observed", "audio": "observed"})
+        different = probe.hda_gfx_association(
+            [token], [bytes((0x00, 0xff, 0x18))],
+            {"gpu": "observed", "audio": "observed"})
+        self.assertEqual(shared["status"], "shared-value-observed")
+        self.assertEqual(different["status"], "different-values-observed")
+        self.assertNotIn("\\x00", repr(shared))
+        self.assertNotIn("\\xff", repr(different))
+
     def test_unreadable_hda_gfx_property_is_incomplete_not_absent(self):
         gpu_registry = plistlib.dumps([{"hda-gfx": 1234}])
         audio_registry = plistlib.dumps([])
@@ -217,6 +231,29 @@ class ProbeTests(unittest.TestCase):
                       if key.endswith("hda_gfx_value_categories")}
         self.assertNotIn("private-unrelated-token", json.dumps(categories))
         self.assertNotIn("1234", json.dumps(categories))
+
+    def test_pci_binary_hda_gfx_match_is_reported_without_content(self):
+        secret = b"private-route\x00\xff"
+        registry = plistlib.dumps([{"class-code": 0x03000000,
+                                    "hda-gfx": secret},
+                                   {"class-code": 0x04010000,
+                                    "hda-gfx": secret}])
+
+        def run(args, timeout=15):
+            if args[0] == "/usr/sbin/ioreg" and args[-1] == "IOPCIDevice":
+                return registry
+            if args[0] == "/usr/sbin/system_profiler":
+                return json.dumps({"SPAudioDataType": []}).encode()
+            return plistlib.dumps([])
+
+        report = probe.collect(run)
+        association = report["pci_display_audio_hda_gfx_association"]
+        self.assertEqual(association["status"], "shared-value-observed")
+        self.assertEqual(report["registry"]["IOPCIDevice"][
+            "pci_display_hda_gfx_value_categories"], {"non-ascii-data": 1})
+        self.assertEqual(report["registry"]["IOPCIDevice"][
+            "pci_audio_hda_gfx_value_categories"], {"non-ascii-data": 1})
+        self.assertNotIn("private-route", json.dumps(report))
 
     def test_unavailable_is_not_zero(self):
         report = probe.collect(lambda args, timeout=15: None)

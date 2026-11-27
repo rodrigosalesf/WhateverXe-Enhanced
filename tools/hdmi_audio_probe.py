@@ -175,10 +175,13 @@ def hda_gfx_value(node):
     if isinstance(value, bytes):
         if not 0 < len(value) <= 128:
             return None
+        raw = value
         try:
             value = value.decode("ascii")
         except UnicodeDecodeError:
-            return None
+            return raw
+        if not value.isprintable():
+            return raw
     if (not isinstance(value, str) or not value or len(value) > 128
             or not value.isprintable()):
         return None
