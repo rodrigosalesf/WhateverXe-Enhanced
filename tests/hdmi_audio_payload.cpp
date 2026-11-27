@@ -40,6 +40,9 @@ struct FakeDip {
     unsigned failAgainAt {};
     unsigned loseAt {};
     unsigned corruptAt {};
+    unsigned ignoreModeAt {};
+    unsigned ignoreModeAgainAt {};
+    unsigned writes {};
     bool owner {true};
 
     bool owns() const { return owner; }
@@ -59,11 +62,13 @@ struct FakeDip {
     }
     bool setTransmit(DipTransmit mode) {
         assert(owner);
-        value.transmit = mode;
+        if (calls + 1 != ignoreModeAt && calls + 1 != ignoreModeAgainAt)
+            value.transmit = mode;
         return finish();
     }
     bool write(const DipImage &image) {
         assert(owner && value.transmit == DipTransmit::disabled);
+        ++writes;
         value.image = image;
         return finish();
     }
@@ -80,7 +85,7 @@ static void testDipTransactions() {
 
     auto fake = initial;
     assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::applied);
-    assert(fake.calls == 6 && sameDipImage(fake.value.image, desired));
+    assert(fake.calls == 7 && sameDipImage(fake.value.image, desired));
     assert(fake.value.transmit == DipTransmit::bestEffort);
     fake.calls = 0;
     assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::unchanged);
@@ -90,7 +95,7 @@ static void testDipTransactions() {
     fake.failAt = 1;
     assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rejected);
     assert(fake.calls == 1 && sameDipImage(fake.value.image, initial.value.image));
-    for (unsigned failure = 2; failure <= 6; ++failure) {
+    for (unsigned failure = 2; failure <= 7; ++failure) {
         fake = initial;
         fake.failAt = failure;
         assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rolledBack);
@@ -99,31 +104,43 @@ static void testDipTransactions() {
     }
     fake = initial;
     fake.value.transmit = DipTransmit::disabled;
-    fake.failAt = 5;
+    fake.failAt = 6;
     assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rolledBack);
     assert(fake.value.transmit == DipTransmit::disabled);
 
     fake = initial;
-    fake.corruptAt = 4;
+    fake.corruptAt = 5;
     assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rolledBack);
     assert(sameDipImage(fake.value.image, initial.value.image));
     fake = initial;
-    fake.failAt = 3;
-    fake.failAgainAt = 5;
+    fake.failAt = 4;
+    fake.failAgainAt = 7;
     assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rollbackFailed);
     assert(fake.value.transmit == DipTransmit::disabled);
 
-    for (unsigned loss = 1; loss <= 6; ++loss) {
+    for (unsigned loss = 1; loss <= 7; ++loss) {
         fake = initial;
         fake.loseAt = loss;
         assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::ownershipLost);
         assert(fake.calls == loss);
     }
     fake = initial;
-    fake.failAt = 3;
-    fake.loseAt = 5; // Ownership changes during rollback.
+    fake.failAt = 4;
+    fake.loseAt = 6; // Ownership changes during rollback readback.
     assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::ownershipLost);
-    assert(fake.calls == 5);
+    assert(fake.calls == 6);
+
+    // Acknowledged-but-ignored stop must never permit a packet write.
+    fake = initial;
+    fake.ignoreModeAt = 2;
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rolledBack);
+    assert(fake.writes == 1 && sameDipImage(fake.value.image, initial.value.image));
+    fake = initial;
+    fake.ignoreModeAt = 2;
+    fake.ignoreModeAgainAt = 4;
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rollbackFailed);
+    assert(fake.writes == 0);
+    assert(fake.value.transmit == DipTransmit::disabled);
 
     fake = initial;
     fake.value.transmit = DipTransmit::once;

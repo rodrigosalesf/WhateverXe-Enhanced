@@ -65,7 +65,17 @@ DipTransactionResult applyDipTransaction(Backend &backend, const DipImage &desir
                actual.transmit == mode && sameDipImage(actual.image, image);
     };
 
-    if (setTransmit(DipTransmit::disabled) &&
+    // A successful command return alone is not evidence that the packet is
+    // quiescent. Confirm the disabled mode and unchanged capacity first.
+    auto stopAndConfirm = [&]() {
+        DipState actual {};
+        return setTransmit(DipTransmit::disabled) && backend.owns() &&
+               backend.read(actual) && backend.owns() &&
+               actual.transmit == DipTransmit::disabled &&
+               actual.image.length == desired.length;
+    };
+
+    if (stopAndConfirm() &&
         write(desired) && verify(desired, DipTransmit::disabled) &&
         setTransmit(DipTransmit::bestEffort) &&
         verify(desired, DipTransmit::bestEffort))
@@ -75,7 +85,7 @@ DipTransactionResult applyDipTransaction(Backend &backend, const DipImage &desir
         return Result::ownershipLost;
     // A write or even a failed mode change may already have modified state.
     // Restore bytes with transmission disabled, then restore the exact mode.
-    if (setTransmit(DipTransmit::disabled) &&
+    if (stopAndConfirm() &&
         write(previous.image) && verify(previous.image, DipTransmit::disabled) &&
         setTransmit(previous.transmit) &&
         verify(previous.image, previous.transmit))
