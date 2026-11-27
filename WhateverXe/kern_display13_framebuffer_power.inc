@@ -149,13 +149,6 @@ bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
     // acquiring a link. Keep unsuccessful TC restoration pending/observable;
     // prepareDisplay13Wake requires it for that output if HPD is present.
     const bool portsReady=restoreDisplay13Ports(controller);
-    // A concurrent sleep/restore invalidates this notification generation.
-    // Never deliver stale DidWake events after an unlocked port handshake.
-    IOLockLock(c.lock);
-    const bool currentRestore=c.controller==controller && c.restoreEpoch==epoch &&
-        !c.bridge.state.suspended && !c.restorePending;
-    IOLockUnlock(c.lock);
-    if(!currentRestore)return false;
     if(displayWakeEventEpoch!=epoch) {
         displayWakeEventEpoch=epoch;displayWakeEventErrors=0;
         for(auto &phase:displayWakeEventPhase)phase=0;
@@ -165,9 +158,6 @@ bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
     uint32_t events[18]={4,display13PagingLayoutKnown};bool complete=true;
     for(unsigned index=0;index<3;++index) {
         IOLockLock(c.lock);
-        if(c.controller!=controller || c.restoreEpoch!=epoch || c.bridge.state.suspended || c.restorePending) {
-            IOLockUnlock(c.lock);complete=false;break;
-        }
         auto fb=Display13FBMemory::field<IOService *>(controller,0xD60+8*index);
         if(fb)fb->retain();
         IOLockUnlock(c.lock);
@@ -221,7 +211,7 @@ bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
         else if(phase!=3)complete=false;
         fb->release();
     }
-    IOLockLock(c.lock);const bool sameEpoch=c.controller==controller && c.restoreEpoch==epoch && !c.bridge.state.suspended && !c.restorePending;IOLockUnlock(c.lock);
+    IOLockLock(c.lock);const bool sameEpoch=c.restoreEpoch==epoch;IOLockUnlock(c.lock);
     complete=complete && sameEpoch && !displayWakeEventErrors;
     events[10]=displayWakeEventEpoch;events[11]=displayWakeEventErrors;events[12]=portsReady;events[13]=complete;
     IORegistryEntry::getRegistryRoot()->setProperty("WEXDisplay13SystemWakeEvents",events,sizeof(events));
