@@ -44,6 +44,16 @@ jobs:
           candidates = ("hwSetPowerWellStatePG", "restorePowerWellsState",
                         "hwEnableAudio", "hwDisableAudio", "setAudioProperties",
                         "IsDisplayAudioSupported")
+          # Inventory DC/DMC entry points without assuming their signatures.
+          dc_names = sorted({name for name in names
+                             if any(token in name.lower() for token in
+                                    ("dcstate", "dc_state", "dc5", "dc6", "dmc",
+                                     "displaycstate", "displayc_state", "powerwell"))})
+          Path("build/hdmi-reference-abi/dc-symbols.json").write_text(
+              json.dumps({"kernel_activation_authorized": False,
+                          "qualification": "name inventory only",
+                          "symbols": dc_names}, indent=2) + "\n")
+          print("DC/DMC candidates:", json.dumps(dc_names))
           report = {"kernel_activation_authorized": False,
                     "qualification": "name inventory only",
                     "candidates": {key: sorted({name for name in names if key in name})
