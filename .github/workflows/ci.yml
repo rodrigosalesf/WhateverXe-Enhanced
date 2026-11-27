@@ -48,7 +48,7 @@ jobs:
           python3 -m venv build/quality-venv
           build/quality-venv/bin/python -m pip install --disable-pip-version-check --only-binary=:all: --no-deps ruff==0.11.13
           build/quality-venv/bin/ruff --version
-          for module in hdmi_audio_probe hdmi_hotplug_replay gpu_telemetry_probe gpu_frequency_probe gpu_rc6_probe display_power_probe frame_pacing_probe gpu_memory_probe install_preflight; do
+          for module in hdmi_audio_probe hdmi_audio_abi hdmi_hotplug_replay gpu_telemetry_probe gpu_frequency_probe gpu_rc6_probe display_power_probe frame_pacing_probe gpu_memory_probe install_preflight; do
             build/quality-venv/bin/ruff check "tools/$module.py" "tests/$module.py"
           done
           build/quality-venv/bin/ruff check tests/xelp_flight_recorder_mutants.py
@@ -76,6 +76,7 @@ jobs:
           python3 tools/test.py
           --require hdmi_audio_probe
           --require hdmi_audio_payload
+          --require hdmi_audio_abi
           --require hdmi_hotplug_replay
           --require gpu_telemetry_probe
           --require gpu_frequency_probe

@@ -70,6 +70,12 @@ route failure, common/backend failure and hook installation, independently of
 native startup success. These are CPU fixtures; neither successful sampling nor
 hook installation demonstrates working acceleration or hardware qualification.
 
+
+### RC2.7 HDMI hook-reference audit
+
+Run `python3 tools/test.py --only hdmi_audio_abi --require hdmi_audio_abi`.
+Synthetic thin x86_64 Mach-O kext fixtures check exact symbol resolution and upstream hook prefixes, duplicate symbols, executable section bounds, malformed tables and file-read failure. No Apple binary is committed or exercised in CI. A prefix match is not a verified live ABI, vtable layout, codec identity, MMIO contract or authorization to install a hook. The offline tool accepts local AppleHDAController, AppleHDA and donor framebuffer binaries and emits only hashes and symbol statuses; unsupported or stripped images must not be treated as a match.
+
 ## Enhanced E5 HDMI audio preflight
 
 Run `python3 tools/test.py --only hdmi_audio_probe --require hdmi_audio_probe`.
