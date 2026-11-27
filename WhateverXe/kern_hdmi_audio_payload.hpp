@@ -134,6 +134,50 @@ inline InfoFrame stereoInfoFrame(unsigned channels) {
     result.length = sizeof(result.bytes);
     return result;
 }
+// Offline admission model, not a hardware discovery or write interface.
+// IDs and connection epochs must come from a separately verified mapping.
+// A vendor ID alone, enumeration order or equal hda-gfx is not that mapping.
+struct RouteEvidence {
+    uint64_t connector {};
+    uint64_t controller {};
+    uint64_t epoch {};
+    uint32_t codecId {};
+    uint8_t codecAddress {};
+    uint8_t transcoder {};
+    bool nativeHdmi {};
+    bool connected {};
+    bool ownershipVerified {};
+};
+
+enum class RouteAdmission { rejected, unique };
+
+inline RouteAdmission admitRoute(const RouteEvidence *candidates, size_t count,
+                                 const RouteEvidence &expected) {
+    if (!candidates || !count || count > 16 || !expected.connector ||
+        !expected.controller || !expected.epoch ||
+        (expected.codecId >> 16) != 0x8086U ||
+        !(expected.codecId & 0xffffU) || expected.codecAddress > 15 ||
+        expected.transcoder > 3 || !expected.nativeHdmi ||
+        !expected.connected || !expected.ownershipVerified)
+        return RouteAdmission::rejected;
+    size_t matches = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const auto &r = candidates[i];
+        if (r.connector != expected.connector) {
+            // A second live claim on the same transcoder is ambiguous.
+            if (r.connected && r.transcoder == expected.transcoder)
+                return RouteAdmission::rejected;
+            continue;
+        }
+        if (r.controller != expected.controller || r.epoch != expected.epoch ||
+            r.codecId != expected.codecId || r.codecAddress != expected.codecAddress ||
+            r.transcoder != expected.transcoder || !r.nativeHdmi ||
+            !r.connected || !r.ownershipVerified)
+            return RouteAdmission::rejected;
+        ++matches;
+    }
+    return matches == 1 ? RouteAdmission::unique : RouteAdmission::rejected;
+}
 } // namespace HDMIAudioPayload
 
 #endif

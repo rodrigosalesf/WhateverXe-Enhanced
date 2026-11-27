@@ -109,5 +109,44 @@ int main() {
     for (unsigned channels = 0; channels <= 16; ++channels)
         if (channels != 2)
             assert(!stereoInfoFrame(channels).length);
-    puts("PASS native HDMI ELD and stereo InfoFrame payloads (CPU only).");
+    // Synthetic IDs only: no claim that these describe the Acer.
+    const RouteEvidence route {1, 7, 3, 0x8086281c, 2, 1, true, true, true};
+    RouteEvidence candidates[] {route, route};
+    assert(admitRoute(candidates, 1, route) == RouteAdmission::unique);
+    assert(admitRoute(candidates, 2, route) == RouteAdmission::rejected);
+    assert(admitRoute(nullptr, 1, route) == RouteAdmission::rejected);
+    assert(admitRoute(candidates, 0, route) == RouteAdmission::rejected);
+    assert(admitRoute(candidates, 17, route) == RouteAdmission::rejected);
+    candidates[1].connector = 2;
+    assert(admitRoute(candidates, 2, route) == RouteAdmission::rejected);
+    candidates[1].transcoder = 2;
+    assert(admitRoute(candidates, 2, route) == RouteAdmission::unique);
+    candidates[1].transcoder = 1;
+    candidates[1].connected = false;
+    assert(admitRoute(candidates, 2, route) == RouteAdmission::unique);
+    candidates[0].epoch = 2;
+    assert(admitRoute(candidates, 1, route) == RouteAdmission::rejected);
+    candidates[0] = route;
+    candidates[0].codecId = 0x10ec0256;
+    assert(admitRoute(candidates, 1, route) == RouteAdmission::rejected);
+    candidates[0] = route;
+    candidates[0].controller = 8;
+    assert(admitRoute(candidates, 1, route) == RouteAdmission::rejected);
+    candidates[0] = route;
+    candidates[0].ownershipVerified = false;
+    assert(admitRoute(candidates, 1, route) == RouteAdmission::rejected);
+    candidates[0] = route;
+    candidates[0].nativeHdmi = false;
+    assert(admitRoute(candidates, 1, route) == RouteAdmission::rejected);
+    candidates[0] = route;
+    candidates[0].codecAddress = 3;
+    assert(admitRoute(candidates, 1, route) == RouteAdmission::rejected);
+    candidates[0] = route;
+    candidates[0].connected = false;
+    assert(admitRoute(candidates, 1, route) == RouteAdmission::rejected);
+    auto invalidExpected = route;
+    invalidExpected.codecId = 0x10ec0256;
+    assert(admitRoute(candidates, 1, invalidExpected) == RouteAdmission::rejected);
+
+    puts("PASS native HDMI ELD, stereo InfoFrame and route admission (CPU only).");
 }
