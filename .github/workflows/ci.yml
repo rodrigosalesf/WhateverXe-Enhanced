@@ -34,6 +34,24 @@ jobs:
           curl --fail --location --silent --show-error --retry 2 --connect-timeout 15 --max-time 120 --output "$donor" \
             'https://raw.githubusercontent.com/b00t0x/WhateverXe-Graphics/a558c561e06b2f78d675d16dd8f4303bf1c33fad/payloads/Sequoia/Library/Extensions/AppleIntelTGLGraphicsFramebuffer.kext/Contents/MacOS/AppleIntelTGLGraphicsFramebuffer'
           test "$(git hash-object "$donor")" = '74baffa1f0ba577ae1c22345fd6011c1ca2d3863'
+          # Inventory candidate names only, never qualify ABI from names.
+          xcrun nm -j "$donor" > "$tmp/framebuffer-symbols.txt"
+          python3 - "$tmp/framebuffer-symbols.txt" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          names = Path(sys.argv[1]).read_text().splitlines()
+          candidates = ("hwSetPowerWellStatePG", "restorePowerWellsState",
+                        "hwEnableAudio", "hwDisableAudio", "setAudioProperties",
+                        "IsDisplayAudioSupported")
+          report = {"kernel_activation_authorized": False,
+                    "qualification": "name inventory only",
+                    "candidates": {key: sorted({name for name in names if key in name})
+                                   for key in candidates}}
+          Path("build/hdmi-reference-abi/power-symbols.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n")
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
           hda='/System/Library/Extensions/AppleHDA.kext/Contents'
           rc=0
           python3 tools/hdmi_audio_abi.py \
@@ -72,7 +90,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: HDMI-reference-ABI
-          path: build/hdmi-reference-abi/reference.json
+          path: build/hdmi-reference-abi/*.json
           if-no-files-found: error
 
   build:
