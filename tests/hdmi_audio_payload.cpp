@@ -109,6 +109,36 @@ int main() {
     for (unsigned channels = 0; channels <= 16; ++channels)
         if (channels != 2)
             assert(!stereoInfoFrame(channels).length);
+    // Independently specified DIP layouts; unknown never defaults to HDMI.
+    const auto fullDip = buildStereoDipImage(frame, DipLayout::fullHdmi14, 14);
+    assert(fullDip.length == sizeof(packet));
+    assert(memcmp(fullDip.bytes, packet, sizeof(packet)) == 0);
+    const auto compactDip = buildStereoDipImage(frame, DipLayout::compactHdmi9, 9);
+    assert(compactDip.length == 9);
+    assert(memcmp(compactDip.bytes, packet, 9) == 0);
+    for (size_t capacity = 14; capacity <= 32; ++capacity) {
+        const auto image = buildStereoDipImage(frame, DipLayout::fullHdmi14, capacity);
+        assert(image.length == capacity);
+        assert(memcmp(image.bytes, packet, sizeof(packet)) == 0);
+        for (size_t i = 14; i < capacity; ++i)
+            assert(image.bytes[i] == 0);
+    }
+    assert(!buildStereoDipImage(frame, DipLayout::unknown, 32).length);
+    assert(!buildStereoDipImage(frame, DipLayout::fullHdmi14, 13).length);
+    assert(!buildStereoDipImage(frame, DipLayout::compactHdmi9, 8).length);
+    assert(!buildStereoDipImage(frame, DipLayout::compactHdmi9, 33).length);
+    assert(!buildStereoDipImage(frame, DipLayout::fullHdmi14, 0).length);
+    auto badFrame = frame;
+    badFrame.bytes[3] ^= 1;
+    assert(!buildStereoDipImage(badFrame, DipLayout::fullHdmi14, 32).length);
+    badFrame = frame;
+    badFrame.bytes[13] = 1;
+    assert(!buildStereoDipImage(badFrame, DipLayout::compactHdmi9, 32).length);
+    badFrame = frame;
+    badFrame.length = 15;
+    assert(!buildStereoDipImage(badFrame, DipLayout::fullHdmi14, 32).length);
+    assert(!buildStereoDipImage({}, DipLayout::fullHdmi14, 32).length);
+
     // Stream parameters must be supported by a single valid LPCM SAD.
     assert(prepareStereoPcmInfoFrame(e, 48000, 16, 2).length == sizeof(packet));
     assert(!prepareStereoPcmInfoFrame(e, 96000, 16, 2).length);
@@ -241,6 +271,17 @@ int main() {
     live.epoch = session.epoch();
     assert(session.observe(live, &live, 1, edid, 256));
     assert(session.prepare(live.epoch, &live, 1, 44100, 16, 2).length);
+    assert(session.prepareDip(live.epoch, &live, 1, 44100, 16, 2,
+                              DipLayout::fullHdmi14, 32).length == 32);
+    assert(!session.prepareDip(live.epoch, &live, 1, 44100, 16, 2,
+                               DipLayout::unknown, 32).length);
+    assert(!session.prepareDip(live.epoch, &live, 1, 48000, 16, 2,
+                               DipLayout::fullHdmi14, 32).length);
+    assert(!session.prepareDip(first.epoch, &first, 1, 44100, 16, 2,
+                               DipLayout::fullHdmi14, 32).length);
+    assert(session.transition(LinkEvent::disconnect));
+    assert(!session.prepareDip(live.epoch, &live, 1, 44100, 16, 2,
+                               DipLayout::fullHdmi14, 32).length);
     LinkAudioSession unidentified {0};
     assert(!unidentified.transition(LinkEvent::connect));
 

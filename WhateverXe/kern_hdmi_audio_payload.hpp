@@ -176,6 +176,49 @@ inline InfoFrame prepareStereoPcmInfoFrame(const Eld &eld, unsigned rate,
     return stereoInfoFrame(channels);
 }
 
+// Offline packet-0 image for the HDA DIP byte-index window (5 bits).
+// A live adapter must independently establish the target codec's layout and
+// reported capacity. In particular, do not infer the layout from size alone.
+enum class DipLayout { unknown, fullHdmi14, compactHdmi9 };
+
+struct DipImage {
+    uint8_t bytes[32] {};
+    size_t length {};
+};
+
+inline DipImage buildStereoDipImage(const InfoFrame &frame, DipLayout layout,
+                                   size_t capacity) {
+    // Only the exact stereo LPCM frame produced by this contract is admitted.
+    // Both encodings retain its checksum; bytes omitted by compact layout are 0.
+    const auto expected = stereoInfoFrame(2);
+    if (frame.length != expected.length)
+        return {};
+    for (size_t i = 0; i < expected.length; ++i)
+        if (frame.bytes[i] != expected.bytes[i])
+            return {};
+
+    size_t required = 0;
+    switch (layout) {
+        case DipLayout::fullHdmi14:
+            required = 14;
+            break;
+        case DipLayout::compactHdmi9:
+            required = 9;
+            break;
+        default:
+            return {};
+    }
+    DipImage image {};
+    if (capacity < required || capacity > sizeof(image.bytes))
+        return {};
+    // The bounded image is zero-padded so old packet tail bytes are not reused.
+    // This is a desired image, not a sequence of hardware commands.
+    for (size_t i = 0; i < required; ++i)
+        image.bytes[i] = frame.bytes[i];
+    image.length = capacity;
+    return image;
+}
+
 // Offline admission model, not a hardware discovery or write interface.
 // IDs and connection epochs must come from a separately verified mapping.
 // A vendor ID alone, enumeration order or equal hda-gfx is not that mapping.
@@ -314,6 +357,13 @@ public:
             return {};
         }
         return prepareStereoPcmInfoFrame(eld_, rate, bits, channels);
+    }
+
+    DipImage prepareDip(uint64_t acquisitionEpoch, const RouteEvidence *candidates,
+                        size_t count, unsigned rate, unsigned bits, unsigned channels,
+                        DipLayout layout, size_t capacity) {
+        return buildStereoDipImage(prepare(acquisitionEpoch, candidates, count,
+                                           rate, bits, channels), layout, capacity);
     }
 };
 } // namespace HDMIAudioPayload
