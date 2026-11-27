@@ -141,6 +141,8 @@ jobs:
           python3 tools/hdmi_abi_readiness.py -v
           build/quality-venv/bin/ruff check tools/hdmi_route_model.py
           python3 tools/hdmi_route_model.py -v
+          xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror tests/hdmi_route_model.cpp -o build/quality-bin/hdmi-route-model
+          build/quality-bin/hdmi-route-model
           bash -n tools/collect-hdmi-state.sh
       - name: CPU tests
         run: >-
