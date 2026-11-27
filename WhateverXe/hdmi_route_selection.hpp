@@ -9,6 +9,9 @@ struct Widget {
     bool digital;
     const unsigned *connections;
     size_t count;
+    // Explicit GET_CONNECT_SEL evidence, never inferred from ordering.
+    bool selectionKnown {false};
+    size_t selectedIndex {0};
 };
 struct Codec {
     unsigned controller, vendor, address;
@@ -38,6 +41,7 @@ inline bool select(const Codec *codecs, size_t count, unsigned controller,
     const auto *p = nodes[pin];
     if (!p || p->kind != Kind::Pin || !p->digital || !p->connections ||
         !p->count || p->count > 127) return false;
+    if (p->selectionKnown && p->selectedIndex >= p->count) return false;
     unsigned candidate = 0;
     for (size_t i = 0; i < p->count; ++i) {
         unsigned nid = p->connections[i];
@@ -45,6 +49,7 @@ inline bool select(const Codec *codecs, size_t count, unsigned controller,
         const auto &w = *nodes[nid];
         // Only direct, unambiguous digital paths are supported.
         if (w.kind != Kind::Converter || !w.digital) return false;
+        if (p->selectionKnown && i != p->selectedIndex) continue;
         if (candidate && candidate != nid) return false;
         candidate = nid;
     }
