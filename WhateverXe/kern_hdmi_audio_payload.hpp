@@ -22,9 +22,9 @@ inline bool checksumValid(const uint8_t *block) {
     return (sum & 0xffU) == 0;
 }
 
-// Require a complete EDID and an explicit HDMI VSDB plus a usable LPCM SAD.
-// Never publish a partial ELD if a later extension is malformed. This first
-// native-HDMI contract intentionally does not synthesize SADs from Basic Audio.
+// Require complete EDID and explicit HDMI VSDB. Basic Audio alone permits
+// baseline stereo LPCM only when no audio descriptors are supplied.
+// Never publish partial ELD or override explicit/malformed descriptors.
 inline Eld buildEld(const uint8_t *edid, size_t size) {
     static constexpr uint8_t magic[] {0, 255, 255, 255, 255, 255, 255, 0};
     if (!edid || size < 256 || size != (size_t(edid[126]) + 1) * 128)
@@ -38,7 +38,7 @@ inline Eld buildEld(const uint8_t *edid, size_t size) {
 
     uint8_t sad[45] {};
     unsigned count = 0, revision = 0, speakers = 0;
-    bool hdmi = false, pcm = false;
+    bool hdmi = false, pcm = false, basicAudio = false;
     for (size_t off = 128; off < size; off += 128) {
         const auto *cta = edid + off;
         if (cta[0] != 2)
@@ -52,6 +52,7 @@ inline Eld buildEld(const uint8_t *edid, size_t size) {
             continue;
         if (end < 4 || end > 127)
             return {};
+        basicAudio = basicAudio || (cta[3] & 0x40U);
         for (unsigned i = 4; i < end;) {
             const unsigned tag = cta[i] >> 5, len = cta[i] & 31U;
             ++i;
@@ -82,7 +83,17 @@ inline Eld buildEld(const uint8_t *edid, size_t size) {
             i += len;
         }
     }
-    if (!hdmi || !pcm)
+    if (!hdmi)
+        return {};
+    if (!count && basicAudio) {
+        // CTA Basic Audio: 2-channel LPCM, 32/44.1/48 kHz, 16-bit.
+        sad[0] = 0x09;
+        sad[1] = 0x07;
+        sad[2] = 0x01;
+        count = 1;
+        pcm = true;
+    }
+    if (!pcm)
         return {};
 
     Eld result {};
