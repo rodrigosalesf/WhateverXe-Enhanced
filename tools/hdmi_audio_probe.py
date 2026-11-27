@@ -185,6 +185,28 @@ def hda_gfx_value(node):
     return value
 
 
+def hda_gfx_value_category(node):
+    """Classify a property for diagnostics without returning its content."""
+    value = node.get("hda-gfx")
+    if isinstance(value, bytes):
+        if not value:
+            return "empty-data"
+        if len(value) > 128:
+            return "oversized-data"
+        try:
+            decoded = value.decode("ascii")
+        except UnicodeDecodeError:
+            return "non-ascii-data"
+        return "ascii-data" if decoded.isprintable() else "non-printable-data"
+    if isinstance(value, str):
+        if not value:
+            return "empty-string"
+        if len(value) > 128:
+            return "oversized-string"
+        return "printable-string" if value.isprintable() else "non-printable-string"
+    return "other-type"
+
+
 def hda_gfx_association(gpu_values, audio_values, service_status,
                         gpu_property_count=None, audio_property_count=None):
     """Compare candidate service properties without publishing their values."""
@@ -251,9 +273,11 @@ def registry_class(cls, run=command):
         subclasses = []
         audio_hda_gfx_values = []
         audio_hda_gfx_property_count = 0
+        audio_hda_gfx_categories = {}
         display_subclasses = []
         display_hda_gfx_values = []
         display_hda_gfx_property_count = 0
+        display_hda_gfx_categories = {}
         for node in decoded:
             code = numeric_property(node.get("class-code"))
             if code is None:
@@ -265,6 +289,9 @@ def registry_class(cls, run=command):
                 display_subclasses.append(subclass)
                 if "hda-gfx" in node:
                     display_hda_gfx_property_count += 1
+                    category = hda_gfx_value_category(node)
+                    display_hda_gfx_categories[category] = (
+                        display_hda_gfx_categories.get(category, 0) + 1)
                     token = hda_gfx_value(node)
                     if token is not None:
                         display_hda_gfx_values.append(token)
@@ -272,6 +299,9 @@ def registry_class(cls, run=command):
             subclasses.append(subclass)
             if "hda-gfx" in node:
                 audio_hda_gfx_property_count += 1
+                category = hda_gfx_value_category(node)
+                audio_hda_gfx_categories[category] = (
+                    audio_hda_gfx_categories.get(category, 0) + 1)
                 token = hda_gfx_value(node)
                 if token is not None:
                     audio_hda_gfx_values.append(token)
@@ -290,6 +320,8 @@ def registry_class(cls, run=command):
         result["pci_audio_class_status"] = "observed" if class_codes else "unavailable"
         result["pci_display_class_candidates"] = len(display_subclasses)
         result["pci_display_class_status"] = "observed" if class_codes else "unavailable"
+        result["pci_display_hda_gfx_value_categories"] = display_hda_gfx_categories
+        result["pci_audio_hda_gfx_value_categories"] = audio_hda_gfx_categories
         result["_pci_audio_hda_gfx_values"] = audio_hda_gfx_values
         result["_pci_audio_hda_gfx_property_count"] = audio_hda_gfx_property_count
         result["_pci_display_hda_gfx_values"] = display_hda_gfx_values

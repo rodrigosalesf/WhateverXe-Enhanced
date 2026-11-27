@@ -200,6 +200,24 @@ class ProbeTests(unittest.TestCase):
             {"class-code": "0x401", "vendor-id": "0x8086", "device-id": "0x51c8"},
             {"class-code": "0x403"}])
 
+    def test_pci_hda_gfx_value_categories_are_redacted(self):
+        registry = plistlib.dumps([{"class-code": 0x03000000,
+                                    "hda-gfx": 1234},
+                                   {"class-code": 0x04010000,
+                                    "hda-gfx": bytes((0xff,))},
+                                   {"class-code": 0x06040000,
+                                    "hda-gfx": "private-unrelated-token"}])
+        result = probe.registry_class(
+            "IOPCIDevice", lambda args, timeout=15: registry)
+        self.assertEqual(result["pci_display_hda_gfx_value_categories"],
+                         {"other-type": 1})
+        self.assertEqual(result["pci_audio_hda_gfx_value_categories"],
+                         {"non-ascii-data": 1})
+        categories = {key: value for key, value in result.items()
+                      if key.endswith("hda_gfx_value_categories")}
+        self.assertNotIn("private-unrelated-token", json.dumps(categories))
+        self.assertNotIn("1234", json.dumps(categories))
+
     def test_unavailable_is_not_zero(self):
         report = probe.collect(lambda args, timeout=15: None)
         self.assertEqual(report["registry"]["AppleDisplay"], {"status": "unavailable"})

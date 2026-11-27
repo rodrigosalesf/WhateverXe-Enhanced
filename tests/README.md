@@ -106,7 +106,10 @@ result incomplete rather than implying that a property is absent. These
 categories describe response shape,
 not the reason the service produced it. Present but unreadable `hda-gfx`
 properties also make the comparison incomplete; candidate counts include
-property-bearing nodes even when their values cannot be compared. A zero PCI
+property-bearing nodes even when their values cannot be compared. PCI candidate
+summaries include counts of redacted `hda-gfx` value categories (printable
+string, ASCII data, empty, oversized, non-printable, non-ASCII data or other
+type) to explain why a value could not be compared without recording it. A zero PCI
 audio-class count is qualified by whether PCI class codes were readable.
 Missing properties or classes are not proof that
 audio is unsupported. The investigation is informed by
