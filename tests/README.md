@@ -114,6 +114,10 @@ type) to explain why a value could not be compared without recording it. Bounded
 binary values are compared in memory for equality; only the shared/different
 result is reported, and the bytes are never serialized. A zero PCI
 audio-class count is qualified by whether PCI class codes were readable.
+The snapshot also reduces `kmutil showloaded` to loaded/not-listed states for
+AppleALC and AppleGFXHDA, and controller registry names to the roles HDEF, HDAU,
+HDAS, other or unavailable. It does not emit extension identifiers, versions,
+paths or controller names; these states do not prove service attachment.
 Missing properties or classes are not proof that
 audio is unsupported. The investigation is informed by
 [jkbuha's contribution](https://github.com/b00t0x/WhateverXe/issues/150)

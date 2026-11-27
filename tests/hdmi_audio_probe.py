@@ -84,7 +84,8 @@ class ProbeTests(unittest.TestCase):
                                    "IORegistryEntryName": "private-display",
                                    "serial-number": "private-serial"}])
         gpu_registry = plistlib.dumps([{"hda-gfx": "private-route-token"}])
-        audio_registry = plistlib.dumps([{"hda-gfx": "private-route-token"}])
+        audio_registry = plistlib.dumps([{"hda-gfx": "private-route-token",
+                                          "IORegistryEntryName": "HDEF@1F,3"}])
         pci_registry = plistlib.dumps([{"class-code": 0x04030000,
                                         "vendor-id": 0x8086,
                                         "device-id": 0x51c8,
@@ -106,15 +107,21 @@ class ProbeTests(unittest.TestCase):
                         "AppleIntelFramebuffer": gpu_registry,
                         "AppleHDAController": audio_registry,
                         "IOPCIDevice": pci_registry}.get(args[-1], plistlib.dumps([]))
+            if args == ["/usr/bin/kmutil", "showloaded", "--list-only"]:
+                return b"as.vit9696.AppleALC\ncom.apple.driver.AppleGFXHDA\n"
             self.assertEqual(args, ["/usr/sbin/system_profiler", "SPAudioDataType", "-json"])
             return audio
         report = probe.collect(run)
-        self.assertEqual(len(calls), len(probe.CLASSES) + 1)
+        self.assertEqual(len(calls), len(probe.CLASSES) + 2)
         node = report["registry"]["AppleDisplay"]["nodes"][0]
         self.assertEqual(node["vendor-id"], "0x8086")
         self.assertEqual(node["device-id"], "0x46a3")
         self.assertTrue(node["edid_audio"]["advertises_audio"])
         self.assertEqual(report["audio_outputs"]["transport_counts"], {"HDMI": 1})
+        self.assertEqual(report["audio_extensions"], {
+            "status": "observed", "AppleALC": "loaded", "AppleGFXHDA": "loaded"})
+        self.assertEqual(report["registry"]["AppleHDAController"]["controller_name_roles"],
+                         {"HDEF": 1})
         self.assertEqual(report["hda_gfx_association"]["status"], "shared-value-observed")
         self.assertEqual(report["pci_audio_hda_gfx_association"]["status"],
                          "shared-value-observed")
@@ -132,6 +139,7 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(report["registry"]["IOPCIDevice"]["nodes"], [])
         self.assertNotIn("private-", json.dumps(report))
         self.assertNotIn("private-route-token", json.dumps(report))
+        self.assertNotIn("HDEF@", json.dumps(report))
         report_json = json.dumps(report)
         for private_key in ("_hda_gfx_values", "_hda_gfx_property_count",
                             "_pci_audio_hda_gfx_values",
@@ -169,6 +177,26 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(different["status"], "different-values-observed")
         self.assertNotIn("\\x00", repr(shared))
         self.assertNotIn("\\xff", repr(different))
+
+    def test_audio_extension_states_and_controller_role_are_redacted(self):
+        self.assertEqual(probe.audio_extension_summary(
+            b"as.vit9696.AppleALC\ncom.apple.driver.AppleGFXHDA\n"), {
+                "status": "observed", "AppleALC": "loaded",
+                "AppleGFXHDA": "loaded"})
+        self.assertEqual(probe.audio_extension_summary(
+            b"com.apple.driver.AppleHDAController\n"), {
+                "status": "observed", "AppleALC": "not-listed",
+                "AppleGFXHDA": "not-listed"})
+        self.assertEqual(probe.audio_extension_summary(None), {"status": "unavailable"})
+        self.assertEqual(probe.audio_extension_summary(bytes((0xff,))),
+                         {"status": "invalid-response"})
+        self.assertEqual(probe.hda_controller_name_role(
+            {"IORegistryEntryName": "HDEF@1F,3"}), "HDEF")
+        self.assertEqual(probe.hda_controller_name_role(
+            {"IORegistryEntryName": "HDAS@1F,3"}), "HDAS")
+        self.assertEqual(probe.hda_controller_name_role(
+            {"IORegistryEntryName": "private-controller-name"}), "other")
+        self.assertEqual(probe.hda_controller_name_role({}), "unavailable")
 
     def test_unreadable_hda_gfx_property_is_incomplete_not_absent(self):
         gpu_registry = plistlib.dumps([{"hda-gfx": 1234}])

@@ -163,6 +163,37 @@ def summarize_node(node):
     return result
 
 
+def hda_controller_name_role(node):
+    """Reduce the controller's registry name to an allowlisted role only."""
+    value = node.get("IORegistryEntryName", node.get("name"))
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("ascii")
+        except UnicodeDecodeError:
+            return "other"
+    if not isinstance(value, str):
+        return "unavailable"
+    role = value.split("@", 1)[0]
+    return role if role in ("HDEF", "HDAU", "HDAS") else "other"
+
+
+def audio_extension_summary(raw):
+    """Report only whether the two relevant extension names were listed."""
+    if not isinstance(raw, bytes) or not raw:
+        return {"status": "unavailable"}
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        return {"status": "invalid-response"}
+    if not lines:
+        return {"status": "invalid-response"}
+    return {
+        "status": "observed",
+        "AppleALC": "loaded" if any("AppleALC" in line for line in lines) else "not-listed",
+        "AppleGFXHDA": "loaded" if any("AppleGFXHDA" in line for line in lines) else "not-listed",
+    }
+
+
 def plist_nodes(value):
     if not isinstance(value, list) or any(not isinstance(n, dict) for n in value):
         raise ValueError("unexpected registry plist")
@@ -268,6 +299,12 @@ def registry_class(cls, run=command):
                                   if (token := hda_gfx_value(node)) is not None]
     result["_hda_gfx_property_count"] = sum(
         "hda-gfx" in node for node in decoded)
+    if cls == "AppleHDAController":
+        roles = {}
+        for node in decoded:
+            role = hda_controller_name_role(node)
+            roles[role] = roles.get(role, 0) + 1
+        result["controller_name_roles"] = roles
     if cls == "IOPCIDevice":
         class_codes = [numeric_property(node.get("class-code")) for node in decoded]
         class_codes = [code for code in class_codes if code is not None]
@@ -364,6 +401,8 @@ def audio_output_summary(value):
 
 def collect(run=command):
     registry = {cls: registry_class(cls, run) for cls in CLASSES}
+    kexts = run(["/usr/bin/kmutil", "showloaded", "--list-only"], 30)
+    extension_summary = audio_extension_summary(kexts)
     gpu_values = []
     gpu_property_count = 0
     for cls in ("AppleIntelFramebuffer",):
@@ -391,6 +430,7 @@ def collect(run=command):
                            "AppleHDAController": registry["AppleHDAController"]["status"],
                            "AppleGFXHDA": registry["AppleGFXHDA"]["status"]}
     report = {"schema": 1, "macos": platform.mac_ver()[0], "registry": registry,
+              "audio_extensions": extension_summary,
               "hda_gfx_association": hda_gfx_association(
                   gpu_values, audio_values, association_classes,
                   gpu_property_count, audio_property_count)}
