@@ -241,7 +241,7 @@ inline RouteAdmission admitRoute(const RouteEvidence *candidates, size_t count,
     if (!candidates || !count || count > 16 || !expected.connector ||
         !expected.controller || !expected.epoch ||
         (expected.codecId >> 16) != 0x8086U ||
-        !(expected.codecId & 0xffffU) || expected.codecAddress > 15 ||
+        !(expected.codecId & 0xffffU) || expected.codecAddress > 14 ||
         expected.transcoder > 3 || !expected.nativeHdmi ||
         !expected.connected || !expected.ownershipVerified)
         return RouteAdmission::rejected;
