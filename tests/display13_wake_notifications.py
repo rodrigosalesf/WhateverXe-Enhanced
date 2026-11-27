@@ -38,7 +38,8 @@ struct XE {
  struct {bool dsi=true;}adlnOutputWiring;
  uint32_t displayWakeEventBusy=0,displayWakeEventEpoch=0,displayWakeEventErrors=0;
  uint32_t displayWakeEventPhase[3]{};
- bool restoreDisplay13Ports(IOService*){assert(!held);return true;}
+ bool advanceEpochOnPorts=false;
+ bool restoreDisplay13Ports(IOService*){assert(!held);if(advanceEpochOnPorts)++display13FBPower.restoreEpoch;return true;}
  bool finishDisplay13SystemWake(IOService*,bool=false);
 };
 FUNCTION
@@ -63,6 +64,12 @@ int main(){
   put(fb[0],0x4284,2U);put(fb[1],0x4284,0U);put(fb[2],0x4284,1U);
   if(nativeFirst){event(&fb[1],4,reinterpret_cast<void*>(1));event(&fb[1],8,nullptr);put(fb[1],0x4284,2U);}
  };
+ // An unlocked port handshake can invalidate the captured restore generation.
+ reset(false);xe.advanceEpochOnPorts=true;
+ assert(!xe.finishDisplay13SystemWake(&fb[0]));
+ for(unsigned i=0;i<3;++i)assert(!wakes[i] && !ons[i]);
+ assert(!held && !xe.displayWakeEventBusy);xe.advanceEpochOnPorts=false;
+ assert(xe.finishDisplay13SystemWake(&fb[0]));
  // Reject undersized callers before interpreting donor-private fields.
  reset(false);fb[0].reportedSize=0x1d0;
  assert(!xe.finishDisplay13SystemWake(&fb[0]) && !wakes[0] && !held && !xe.displayWakeEventBusy);
