@@ -137,6 +137,8 @@ jobs:
           set -euo pipefail
           build/quality-venv/bin/ruff check tools/hdmi_edid_probe.py
           python3 tools/hdmi_edid_probe.py -v
+          build/quality-venv/bin/ruff check tools/hdmi_abi_readiness.py
+          python3 tools/hdmi_abi_readiness.py -v
           bash -n tools/collect-hdmi-state.sh
       - name: CPU tests
         run: >-
