@@ -20,4 +20,16 @@ int main() {
     before.powered = false;
     assert(!prepare(before,3,1,c));
     assert(out == 0xB0);
+    Snapshot pin {0x66000, PinBufferOffset, true, 0x1234};
+    assert(preparePinBuffer(pin,c) && c.desired == 0x80001234U);
+    assert(!prepareCodecWake(pin,true,c));
+    Snapshot wake {0x66000, CodecWakeOffset, true, 0x8123};
+    assert(prepareCodecWake(wake,false,c) && c.desired == 0x123U);
+    wake.value = c.desired;
+    assert(prepareCodecWake(wake,true,c) && c.desired == 0x8123U);
+    assert(!preparePinBuffer(wake,c));
+    wake.powered = false;
+    assert(!prepareCodecWake(wake,true,c));
+    pin.length = PinBufferOffset;
+    assert(!preparePinBuffer(pin,c));
 }
