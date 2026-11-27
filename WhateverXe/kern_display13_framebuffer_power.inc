@@ -149,7 +149,7 @@ bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
     // not a scanout-success report and must not depend on an unplugged peer
     // acquiring a link. Keep unsuccessful TC restoration pending/observable;
     // prepareDisplay13Wake requires it for that output if HPD is present.
-    const bool portsReady=restoreDisplay13Ports(controller);
+    const bool portsReady=restoreDisplay13Ports(controller,epoch);
     IOLockLock(c.lock);
     const bool currentEpoch=c.restoreEpoch==epoch;
     IOLockUnlock(c.lock);

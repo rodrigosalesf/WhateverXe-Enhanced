@@ -10868,12 +10868,11 @@ bool XE::restoreDisplay13ResourcesLocked(void *power,bool waking) {
     return ready;
 }
 
-bool XE::restoreDisplay13Ports(IOService *controller,unsigned onlyDDI) {
+bool XE::restoreDisplay13Ports(IOService *controller,uint32_t epoch,unsigned onlyDDI) {
     auto &c=display13FBPower;bool ready=true;uint32_t ports[10]={1};
     if(!c.lock || !controller || (onlyDDI!=UINT32_MAX && (onlyDDI<3 || onlyDDI>=7)))return false;
     IOLockLock(c.lock);
-    const auto epoch=c.restoreEpoch;
-    const bool admitted=c.controller==controller && !c.restorePending && !c.bridge.state.suspended;
+    const bool admitted=c.restoreEpoch==epoch && c.controller==controller && !c.restorePending && !c.bridge.state.suspended;
     IOLockUnlock(c.lock);
     if(!admitted)return false;
     for(unsigned tc=0;tc<4;++tc) {
@@ -10930,17 +10929,19 @@ bool XE::prepareDisplay13Wake(IOService *fb) {
             connected=sde==UINT32_MAX || north==UINT32_MAX || port.legacyHPD(sde) || port.altHPD(sde,north);
         }
     }
+    const auto epoch=c.restoreEpoch;
     IOLockUnlock(c.lock);
     // A disconnected peer must reach native probing/teardown, not prevent
     // every other FB from waking. Only this output's live TC link is required.
-    return ready && (!connected || restoreDisplay13Ports(controller,ddi));
+    return ready && (!connected || restoreDisplay13Ports(controller,epoch,ddi));
 }
 
 void XE::wrapAlderLakeNPowerRestore(void *power,bool waking) {
     auto &c=display13FBPower;if(!c.lock || power!=c.power || !c.controller)return;
     IOLockLock(c.lock);const bool ready=restoreDisplay13ResourcesLocked(power,waking);
-    auto controller=static_cast<IOService *>(c.controller);IOLockUnlock(c.lock);
-    if(ready)restoreDisplay13Ports(controller);
+    auto controller=static_cast<IOService *>(c.controller);
+    const auto epoch=c.restoreEpoch;IOLockUnlock(c.lock);
+    if(ready)restoreDisplay13Ports(controller,epoch);
 }
 
 void XE::wrapAlderLakeNPrimaryDBUF(OSObject *plane,uint32_t start,uint32_t end,bool wait) {

@@ -57,7 +57,7 @@ struct XE {
  uint32_t displayWakeEventBusy=0,displayWakeEventEpoch=0,displayWakeEventErrors=0,displayWakeEventPhase[3]{};
  bool resumeDSIPath(IOService*,IOService*,OSObject*){assert(false);return false;}
  bool quiesceDSIPath(IOService*,IOService*,OSObject*,bool=false){assert(false);return false;}
- bool restoreDisplay13Ports(IOService*){assert(!held);return portsReady;}
+ bool restoreDisplay13Ports(IOService*,uint32_t epoch){assert(epoch==display13FBPower.restoreEpoch);assert(!held);return portsReady;}
  static bool prepareDisplay13Wake(IOService*){return hardwareReady;}
  static void recordDSIClient(IOService*,unsigned,uint32_t,uint32_t){}
  bool ownedDisplay13Framebuffer(IOService*)const;

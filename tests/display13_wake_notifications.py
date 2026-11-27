@@ -39,7 +39,7 @@ struct XE {
  uint32_t displayWakeEventBusy=0,displayWakeEventEpoch=0,displayWakeEventErrors=0;
  uint32_t displayWakeEventPhase[3]{};
  bool advanceEpochOnPorts=false;
- bool restoreDisplay13Ports(IOService*){assert(!held);if(advanceEpochOnPorts)++display13FBPower.restoreEpoch;return true;}
+ bool restoreDisplay13Ports(IOService*,uint32_t epoch){assert(epoch==display13FBPower.restoreEpoch);assert(!held);if(advanceEpochOnPorts)++display13FBPower.restoreEpoch;return true;}
  bool finishDisplay13SystemWake(IOService*,bool=false);
 };
 FUNCTION
