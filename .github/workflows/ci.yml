@@ -131,6 +131,13 @@ jobs:
           xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -fsyntax-only tests/xelp_flight_recorder.cpp
           "$tidy" tests/hdmi_audio_payload.cpp -- -std=c++17 -IWhateverXe -isysroot "$sdk"
           xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -IWhateverXe -fsyntax-only tests/hdmi_audio_payload.cpp
+      - name: HDMI EDID offline tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          build/quality-venv/bin/ruff check tools/hdmi_edid_probe.py
+          python3 tools/hdmi_edid_probe.py -v
+          bash -n tools/collect-hdmi-state.sh
       - name: CPU tests
         run: >-
           python3 tools/test.py
