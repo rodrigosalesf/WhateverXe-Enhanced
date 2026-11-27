@@ -220,6 +220,102 @@ inline RouteAdmission admitRoute(const RouteEvidence *candidates, size_t count,
     }
     return matches == 1 ? RouteAdmission::unique : RouteAdmission::rejected;
 }
+// One connector, externally serialized by its future owner. No callbacks,
+// hardware IO or persistence. Tokens are meaningful only within this object.
+enum class LinkEvent { connect, disconnect, modeChange, suspend, resume };
+enum class LinkState { disconnected, connected, suspended, exhausted };
+
+class LinkAudioSession {
+    const uint64_t connector_;
+    uint64_t epoch_ {};
+    LinkState state_ {LinkState::disconnected};
+    RouteEvidence route_ {};
+    Eld eld_ {};
+
+    void revoke() {
+        route_ = {};
+        eld_ = {};
+    }
+
+public:
+    explicit LinkAudioSession(uint64_t connector) : connector_(connector) {}
+    LinkAudioSession(const LinkAudioSession &) = delete;
+    LinkAudioSession &operator=(const LinkAudioSession &) = delete;
+
+    uint64_t epoch() const { return epoch_; }
+    LinkState state() const { return state_; }
+    bool hasEvidence() const { return eld_.length != 0; }
+
+    bool transition(LinkEvent event) {
+        if (!connector_ || state_ == LinkState::exhausted)
+            return false;
+        LinkState next = state_;
+        switch (event) {
+            case LinkEvent::connect:
+                if (state_ == LinkState::suspended)
+                    return false;
+                next = LinkState::connected;
+                break;
+            case LinkEvent::disconnect:
+                if (state_ == LinkState::suspended)
+                    return false;
+                next = LinkState::disconnected;
+                break;
+            case LinkEvent::modeChange:
+                if (state_ != LinkState::connected)
+                    return false;
+                break;
+            case LinkEvent::suspend:
+                next = LinkState::suspended;
+                break;
+            case LinkEvent::resume:
+                if (state_ != LinkState::suspended)
+                    return false;
+                // Resume alone is not proof of the previous connection.
+                next = LinkState::disconnected;
+                break;
+            default:
+                return false;
+        }
+        revoke();
+        if (epoch_ == UINT64_MAX) {
+            state_ = LinkState::exhausted;
+            return false;
+        }
+        ++epoch_;
+        state_ = next;
+        return true;
+    }
+
+    // The caller must capture the epoch at acquisition, not completion.
+    // Stale results must not replace or revoke current-generation evidence.
+    bool observe(const RouteEvidence &expected, const RouteEvidence *candidates,
+                 size_t count, const uint8_t *edid, size_t size) {
+        if (state_ != LinkState::connected || expected.epoch != epoch_ ||
+            expected.connector != connector_)
+            return false;
+        revoke();
+        if (admitRoute(candidates, count, expected) != RouteAdmission::unique)
+            return false;
+        const auto payload = buildEld(edid, size);
+        if (!payload.length)
+            return false;
+        route_ = expected;
+        eld_ = payload;
+        return true;
+    }
+
+    InfoFrame prepare(uint64_t acquisitionEpoch, const RouteEvidence *candidates,
+                      size_t count, unsigned rate, unsigned bits, unsigned channels) {
+        if (state_ != LinkState::connected || acquisitionEpoch != epoch_ || !hasEvidence())
+            return {};
+        if (admitRoute(candidates, count, route_) != RouteAdmission::unique) {
+            revoke();
+            return {};
+        }
+        return prepareStereoPcmInfoFrame(eld_, rate, bits, channels);
+    }
+};
 } // namespace HDMIAudioPayload
 
 #endif

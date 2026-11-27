@@ -183,5 +183,66 @@ int main() {
     invalidExpected.codecId = 0x10ec0256;
     assert(admitRoute(candidates, 1, invalidExpected) == RouteAdmission::rejected);
 
-    puts("PASS native HDMI ELD, stereo InfoFrame and route admission (CPU only).");
+    // Lifecycle tests use only the software session, never a live codec.
+    LinkAudioSession session {route.connector};
+    auto live = route;
+    fixture(edid);
+    assert(!session.observe(live, &live, 1, edid, 256));
+    assert(!session.transition(LinkEvent::resume));
+    assert(session.transition(LinkEvent::connect));
+    live.epoch = session.epoch();
+    const auto first = live;
+    assert(session.observe(live, &live, 1, edid, 256));
+    assert(session.hasEvidence());
+    assert(session.prepare(live.epoch, &live, 1, 48000, 16, 2).length == sizeof(packet));
+    assert(!session.prepare(live.epoch, &live, 1, 96000, 16, 2).length);
+    assert(session.hasEvidence()); // Unsupported format does not invalidate EDID.
+    assert(session.transition(LinkEvent::disconnect));
+    assert(!session.hasEvidence());
+    assert(!session.prepare(first.epoch, &first, 1, 48000, 16, 2).length);
+    assert(session.transition(LinkEvent::connect));
+    live.epoch = session.epoch();
+    assert(!session.observe(first, &first, 1, edid, 256));
+    assert(!session.hasEvidence());
+    edid[134] = 2; // Reconnected sink advertises only 44.1 kHz.
+    checksum(edid + 128);
+    assert(session.observe(live, &live, 1, edid, 256));
+    assert(!session.prepare(live.epoch, &live, 1, 48000, 16, 2).length);
+    assert(session.prepare(live.epoch, &live, 1, 44100, 16, 2).length);
+    assert(!session.observe(first, &first, 1, nullptr, 0));
+    assert(session.hasEvidence());
+    auto other = live;
+    other.connector = 99;
+    assert(!session.observe(other, &other, 1, nullptr, 0));
+    assert(session.hasEvidence());
+    auto conflict = live;
+    conflict.controller += 1;
+    assert(!session.prepare(live.epoch, &conflict, 1, 44100, 16, 2).length);
+    assert(!session.hasEvidence());
+    assert(!session.prepare(live.epoch, &live, 1, 44100, 16, 2).length);
+    assert(session.observe(live, &live, 1, edid, 256));
+    assert(!session.observe(live, &live, 1, nullptr, 0));
+    assert(!session.hasEvidence());
+    assert(session.observe(live, &live, 1, edid, 256));
+    assert(session.transition(LinkEvent::modeChange));
+    assert(!session.hasEvidence());
+    assert(!session.observe(live, &live, 1, edid, 256));
+    live.epoch = session.epoch();
+    assert(session.observe(live, &live, 1, edid, 256));
+    assert(session.transition(LinkEvent::suspend));
+    assert(!session.hasEvidence());
+    assert(!session.transition(LinkEvent::connect));
+    assert(!session.observe(live, &live, 1, edid, 256));
+    assert(session.transition(LinkEvent::resume));
+    assert(session.state() == LinkState::disconnected);
+    assert(!session.hasEvidence());
+    assert(!session.transition(LinkEvent::modeChange));
+    assert(session.transition(LinkEvent::connect));
+    live.epoch = session.epoch();
+    assert(session.observe(live, &live, 1, edid, 256));
+    assert(session.prepare(live.epoch, &live, 1, 44100, 16, 2).length);
+    LinkAudioSession unidentified {0};
+    assert(!unidentified.transition(LinkEvent::connect));
+
+    puts("PASS native HDMI ELD, stereo InfoFrame, route and lifecycle (CPU only).");
 }
