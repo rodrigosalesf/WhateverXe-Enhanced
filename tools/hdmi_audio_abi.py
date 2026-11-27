@@ -105,7 +105,8 @@ def audit(data, targets):
         require(idx < strsize)
         stop = data.find(b"\0", stroff + idx, stroff + strsize)
         require(stop >= 0)
-        name = encoded.get(data[stroff + idx:stop])
+        # A bytearray fixture yields a mutable slice; normalize only the symbol.
+        name = encoded.get(bytes(data[stroff + idx:stop]))
         if name is not None:
             found[name].append((sec, addr))
 

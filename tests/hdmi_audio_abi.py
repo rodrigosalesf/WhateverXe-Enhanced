@@ -40,6 +40,11 @@ class TestABI(unittest.TestCase):
         self.assertEqual(abi.audit(image(), {NAME: PREFIX})[NAME], "prefix_match")
         self.assertEqual(abi.audit(image(), {NAME: None})[NAME], "symbol_present")
 
+    def test_symbol_lookup_accepts_immutable_and_mutable_images(self):
+        for data in (bytes(image()), bytearray(image())):
+            with self.subTest(image_type=type(data).__name__):
+                self.assertEqual(abi.audit(data, {NAME: PREFIX})[NAME], "prefix_match")
+
     def test_nonmatching(self):
         self.assertEqual(abi.audit(image(prefix=b"\x90"), {NAME: PREFIX})[NAME],
                          "prefix_mismatch")
