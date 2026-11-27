@@ -241,6 +241,8 @@ def registry_class(cls, run=command):
         result["pci_class_code_observations"] = len(class_codes)
         audio_devices = []
         subclasses = []
+        audio_hda_gfx_values = []
+        audio_hda_gfx_property_count = 0
         for node in decoded:
             code = numeric_property(node.get("class-code"))
             if code is None:
@@ -251,6 +253,11 @@ def registry_class(cls, run=command):
             if subclass is None:
                 continue
             subclasses.append(subclass)
+            if "hda-gfx" in node:
+                audio_hda_gfx_property_count += 1
+                token = hda_gfx_value(node)
+                if token is not None:
+                    audio_hda_gfx_values.append(token)
             item = {"class-code": f"0x{subclass:x}"}
             for key in ("vendor-id", "device-id"):
                 value = numeric_property(node.get(key))
@@ -264,6 +271,8 @@ def registry_class(cls, run=command):
             result["pci_dsp_audio_class_candidates"] +
             result["pci_hda_class_candidates"])
         result["pci_audio_class_status"] = "observed" if class_codes else "unavailable"
+        result["_pci_audio_hda_gfx_values"] = audio_hda_gfx_values
+        result["_pci_audio_hda_gfx_property_count"] = audio_hda_gfx_property_count
         result["nodes"] = []  # PCI enumeration is summarized; device inventory is not emitted.
     return result
 
@@ -309,9 +318,14 @@ def collect(run=command):
     for cls in ("AppleHDAController", "AppleGFXHDA"):
         audio_values.extend(registry[cls].pop("_hda_gfx_values", []))
         audio_property_count += registry[cls].pop("_hda_gfx_property_count", 0)
+    pci_audio_values = registry["IOPCIDevice"].pop("_pci_audio_hda_gfx_values", [])
+    pci_audio_property_count = registry["IOPCIDevice"].pop(
+        "_pci_audio_hda_gfx_property_count", 0)
     for result in registry.values():
         result.pop("_hda_gfx_values", None)
         result.pop("_hda_gfx_property_count", None)
+        result.pop("_pci_audio_hda_gfx_values", None)
+        result.pop("_pci_audio_hda_gfx_property_count", None)
     association_classes = {"AppleIntelFramebuffer": registry["AppleIntelFramebuffer"]["status"],
                            "AppleHDAController": registry["AppleHDAController"]["status"],
                            "AppleGFXHDA": registry["AppleGFXHDA"]["status"]}
@@ -319,6 +333,16 @@ def collect(run=command):
               "hda_gfx_association": hda_gfx_association(
                   gpu_values, audio_values, association_classes,
                   gpu_property_count, audio_property_count)}
+    pci_audio_association = hda_gfx_association(
+        gpu_values, pci_audio_values,
+        {"AppleIntelFramebuffer": registry["AppleIntelFramebuffer"]["status"],
+         "PCI audio-class candidates": registry["IOPCIDevice"].get(
+             "pci_audio_class_status", "unavailable")},
+        gpu_property_count, pci_audio_property_count)
+    pci_audio_association["limitations"] = (
+        "Compares only hda-gfx values on AppleIntelFramebuffer and PCI audio-class candidates; "
+        "it does not prove provider ownership, AppleGFXHDA attachment, or playback.")
+    report["pci_audio_hda_gfx_association"] = pci_audio_association
     raw = run(["/usr/sbin/system_profiler", "SPAudioDataType", "-json"], 30)
     try:
         report["audio_outputs"] = audio_output_summary(json.loads(raw)) if raw is not None else {"status": "unavailable"}

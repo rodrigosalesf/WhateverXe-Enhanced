@@ -88,7 +88,10 @@ class ProbeTests(unittest.TestCase):
         pci_registry = plistlib.dumps([{"class-code": 0x04030000,
                                         "vendor-id": 0x8086,
                                         "device-id": 0x51c8,
-                                        "IORegistryEntryName": "private-pci-path"}])
+                                        "hda-gfx": "private-route-token",
+                                        "IORegistryEntryName": "private-pci-path"},
+                                       {"class-code": 0x03000000,
+                                        "hda-gfx": "private-unrelated-token"}])
         audio = json.dumps({"SPAudioDataType": [{"_items": [
             {"_name": "private-monitor", "coreaudio_device_output": 2,
              "coreaudio_device_transport": "HDMI"},
@@ -111,15 +114,22 @@ class ProbeTests(unittest.TestCase):
         self.assertTrue(node["edid_audio"]["advertises_audio"])
         self.assertEqual(report["audio_outputs"]["transport_counts"], {"HDMI": 1})
         self.assertEqual(report["hda_gfx_association"]["status"], "shared-value-observed")
+        self.assertEqual(report["pci_audio_hda_gfx_association"]["status"],
+                         "shared-value-observed")
+        self.assertEqual(report["pci_audio_hda_gfx_association"]["audio_candidates"], 1)
         self.assertEqual(report["registry"]["IOPCIDevice"]["pci_audio_class_candidates"], 1)
         self.assertEqual(report["registry"]["IOPCIDevice"]["pci_dsp_audio_class_candidates"], 0)
         self.assertEqual(report["registry"]["IOPCIDevice"]["pci_hda_class_candidates"], 1)
-        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_class_code_observations"], 1)
+        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_class_code_observations"], 2)
         self.assertEqual(report["registry"]["IOPCIDevice"]["pci_audio_class_status"], "observed")
         self.assertEqual(report["registry"]["IOPCIDevice"]["nodes"], [])
         self.assertNotIn("private-", json.dumps(report))
         self.assertNotIn("private-route-token", json.dumps(report))
-        self.assertNotIn("_hda_gfx_", json.dumps(report))
+        report_json = json.dumps(report)
+        for private_key in ("_hda_gfx_values", "_hda_gfx_property_count",
+                            "_pci_audio_hda_gfx_values",
+                            "_pci_audio_hda_gfx_property_count"):
+            self.assertNotIn(private_key, report_json)
         self.assertNotIn("IODisplayEDID", json.dumps(report))
 
     def test_hda_gfx_comparison_is_cautious_and_redacted(self):
