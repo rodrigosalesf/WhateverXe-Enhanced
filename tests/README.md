@@ -91,10 +91,12 @@ compares `hda-gfx` values on `AppleIntelFramebuffer`,
 `AppleHDAController` and `AppleGFXHDA` services. The values themselves are
 never emitted. A separate comparison checks the GPU framebuffer against
 `hda-gfx` properties on PCI class 0401/0403 candidates; it does not assume that
-an audio DSP candidate is an HDMI codec or prove provider ownership. The HDA
-`status-mask` is also reported with its set bit positions,
-beside observed codec addresses and vendor IDs; these registry properties alone
-do not prove that a codec answered a verb. A shared value is only evidence that candidate properties match;
+an audio DSP candidate is an HDMI codec or prove provider ownership. Another
+comparison checks the property directly between PCI display-class and
+PCI audio-class candidates. The HDA `status-mask` is also reported with its set
+bit positions, beside observed codec addresses and vendor IDs; these registry
+properties alone do not prove that a codec answered a verb. A shared value is
+only evidence that candidate properties match;
 it does not establish IORegistry provider ownership, HDA codec response,
 AppleGFXHDA attachment, or playback. This collector does not read live ELD,
 inspect HDA verbs or interrupts, or change device state. Invalid class responses

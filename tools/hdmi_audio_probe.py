@@ -137,6 +137,14 @@ def numeric_property(value):
     return None
 
 
+def pci_display_audio_subclass(code):
+    """Decode the recognized class/subclass from either supported PCI encoding."""
+    return next((candidate for candidate in
+                 ((code >> 16) & 0xffff, (code >> 8) & 0xffff)
+                 if candidate in (0x0401, 0x0403) or
+                 0x0300 <= candidate <= 0x03ff), None)
+
+
 def summarize_node(node):
     # Deliberately exclude raw EDID, names, serials, UUIDs, paths, and arbitrary properties.
     result = {}
@@ -243,14 +251,23 @@ def registry_class(cls, run=command):
         subclasses = []
         audio_hda_gfx_values = []
         audio_hda_gfx_property_count = 0
+        display_subclasses = []
+        display_hda_gfx_values = []
+        display_hda_gfx_property_count = 0
         for node in decoded:
             code = numeric_property(node.get("class-code"))
             if code is None:
                 continue
-            subclass = next((candidate for candidate in
-                             ((code >> 16) & 0xffff, (code >> 8) & 0xffff)
-                             if candidate in (0x0401, 0x0403)), None)
+            subclass = pci_display_audio_subclass(code)
             if subclass is None:
+                continue
+            if 0x0300 <= subclass <= 0x03ff:
+                display_subclasses.append(subclass)
+                if "hda-gfx" in node:
+                    display_hda_gfx_property_count += 1
+                    token = hda_gfx_value(node)
+                    if token is not None:
+                        display_hda_gfx_values.append(token)
                 continue
             subclasses.append(subclass)
             if "hda-gfx" in node:
@@ -271,8 +288,12 @@ def registry_class(cls, run=command):
             result["pci_dsp_audio_class_candidates"] +
             result["pci_hda_class_candidates"])
         result["pci_audio_class_status"] = "observed" if class_codes else "unavailable"
+        result["pci_display_class_candidates"] = len(display_subclasses)
+        result["pci_display_class_status"] = "observed" if class_codes else "unavailable"
         result["_pci_audio_hda_gfx_values"] = audio_hda_gfx_values
         result["_pci_audio_hda_gfx_property_count"] = audio_hda_gfx_property_count
+        result["_pci_display_hda_gfx_values"] = display_hda_gfx_values
+        result["_pci_display_hda_gfx_property_count"] = display_hda_gfx_property_count
         result["nodes"] = []  # PCI enumeration is summarized; device inventory is not emitted.
     return result
 
@@ -321,11 +342,16 @@ def collect(run=command):
     pci_audio_values = registry["IOPCIDevice"].pop("_pci_audio_hda_gfx_values", [])
     pci_audio_property_count = registry["IOPCIDevice"].pop(
         "_pci_audio_hda_gfx_property_count", 0)
+    pci_display_values = registry["IOPCIDevice"].pop("_pci_display_hda_gfx_values", [])
+    pci_display_property_count = registry["IOPCIDevice"].pop(
+        "_pci_display_hda_gfx_property_count", 0)
     for result in registry.values():
         result.pop("_hda_gfx_values", None)
         result.pop("_hda_gfx_property_count", None)
         result.pop("_pci_audio_hda_gfx_values", None)
         result.pop("_pci_audio_hda_gfx_property_count", None)
+        result.pop("_pci_display_hda_gfx_values", None)
+        result.pop("_pci_display_hda_gfx_property_count", None)
     association_classes = {"AppleIntelFramebuffer": registry["AppleIntelFramebuffer"]["status"],
                            "AppleHDAController": registry["AppleHDAController"]["status"],
                            "AppleGFXHDA": registry["AppleGFXHDA"]["status"]}
@@ -343,6 +369,17 @@ def collect(run=command):
         "Compares only hda-gfx values on AppleIntelFramebuffer and PCI audio-class candidates; "
         "it does not prove provider ownership, AppleGFXHDA attachment, or playback.")
     report["pci_audio_hda_gfx_association"] = pci_audio_association
+    pci_display_audio_association = hda_gfx_association(
+        pci_display_values, pci_audio_values,
+        {"PCI display-class candidates": registry["IOPCIDevice"].get(
+             "pci_display_class_status", "unavailable"),
+         "PCI audio-class candidates": registry["IOPCIDevice"].get(
+             "pci_audio_class_status", "unavailable")},
+        pci_display_property_count, pci_audio_property_count)
+    pci_display_audio_association["limitations"] = (
+        "Compares only hda-gfx values on PCI display-class and audio-class candidates; "
+        "it does not prove provider ownership, AppleGFXHDA attachment, or playback.")
+    report["pci_display_audio_hda_gfx_association"] = pci_display_audio_association
     raw = run(["/usr/sbin/system_profiler", "SPAudioDataType", "-json"], 30)
     try:
         report["audio_outputs"] = audio_output_summary(json.loads(raw)) if raw is not None else {"status": "unavailable"}
