@@ -33,4 +33,23 @@ inline bool prepareCodecWake(const Snapshot &s, bool enable, Change &out) {
     return s.offset == CodecWakeOffset &&
         prepare(s, CodecWakeMask, enable ? CodecWakeMask : 0U, out);
 }
+
+// Backend contract: acquire/release serialize an independent audio power lease.
+// update performs a verified masked RMW under that lease, preserving other bits.
+// A failed update may have modified hardware; backend must quarantine on fault.
+// No production backend is admitted here.
+enum class WakeResult { Complete, Unavailable, Fault };
+template<class Backend> WakeResult executeCodecWake(Backend &io, bool enable) {
+    if (!io.acquire()) return WakeResult::Unavailable;
+    bool ok = io.update(PinBufferOffset, PinBufferMask, PinBufferMask)
+        && io.update(CodecWakeOffset, CodecWakeMask, 0U)
+        && io.delay(WakeMinimumDelayUs);
+    if (ok && enable)
+        ok = io.update(CodecWakeOffset, CodecWakeMask, CodecWakeMask)
+            && io.delay(WakeMinimumDelayUs);
+    // Fault handling belongs to the lease owner, not a blind MMIO rollback.
+    if (!ok) io.quarantine();
+    const bool released = io.release();
+    return ok && released ? WakeResult::Complete : WakeResult::Fault;
+}
 }
