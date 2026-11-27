@@ -84,14 +84,15 @@ hardware playback test.
 
 On macOS run `python3 tools/hdmi_audio_probe.py` for a read-only JSON snapshot.
 It reports selected properties and counts rather than raw EDID, device names,
-serials or machine identifiers. The snapshot counts PCI multimedia-audio
-controllers (class 0401) and high-definition audio controllers (class 0403)
-separately, including only their PCI vendor/device IDs and class codes, and
+serials or machine identifiers. The snapshot counts PCI audio-class candidates
+with class codes 0401 and 0403 separately, including only their PCI vendor/device
+IDs and class codes. A class code alone does not prove driver binding or a
+specific controller function. The snapshot also
 compares `hda-gfx` values on `AppleIntelFramebuffer`,
 `AppleHDAController` and `AppleGFXHDA` services. The values themselves are
 never emitted. A separate comparison checks the GPU framebuffer against
 `hda-gfx` properties on PCI class 0401/0403 candidates; it does not assume that
-an audio DSP candidate is an HDMI codec or prove provider ownership. Another
+a class 0401 candidate is an HDMI codec or prove provider ownership. Another
 comparison checks the property directly between PCI display-class and
 PCI audio-class candidates. The HDA `status-mask` is also reported with its set
 bit positions, beside observed codec addresses and vendor IDs; these registry

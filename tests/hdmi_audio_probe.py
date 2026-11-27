@@ -124,8 +124,8 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(report["pci_display_audio_hda_gfx_association"]["gpu_candidates"], 1)
         self.assertEqual(report["pci_display_audio_hda_gfx_association"]["audio_candidates"], 1)
         self.assertEqual(report["registry"]["IOPCIDevice"]["pci_audio_class_candidates"], 1)
-        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_dsp_audio_class_candidates"], 0)
-        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_hda_class_candidates"], 1)
+        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_audio_class_0401_candidates"], 0)
+        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_audio_class_0403_candidates"], 1)
         self.assertEqual(report["registry"]["IOPCIDevice"]["pci_class_code_observations"], 3)
         self.assertEqual(report["registry"]["IOPCIDevice"]["pci_display_class_candidates"], 1)
         self.assertEqual(report["registry"]["IOPCIDevice"]["pci_audio_class_status"], "observed")
@@ -200,15 +200,15 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(result["pci_audio_class_status"], "unavailable")
         self.assertEqual(result["nodes"], [])
 
-    def test_pci_audio_candidates_include_dsp_and_hda_class_codes(self):
+    def test_pci_audio_candidates_keep_0401_and_0403_class_codes_distinct(self):
         registry = plistlib.dumps([{"class-code": 0x04010000,
                                     "vendor-id": 0x8086, "device-id": 0x51c8},
                                    {"class-code": 0x04030000}])
         result = probe.registry_class(
             "IOPCIDevice", lambda args, timeout=15: registry)
         self.assertEqual(result["pci_class_code_observations"], 2)
-        self.assertEqual(result["pci_dsp_audio_class_candidates"], 1)
-        self.assertEqual(result["pci_hda_class_candidates"], 1)
+        self.assertEqual(result["pci_audio_class_0401_candidates"], 1)
+        self.assertEqual(result["pci_audio_class_0403_candidates"], 1)
         self.assertEqual(result["pci_audio_class_candidates"], 2)
         self.assertEqual(result["pci_audio_class_devices"], [
             {"class-code": "0x401", "vendor-id": "0x8086", "device-id": "0x51c8"},

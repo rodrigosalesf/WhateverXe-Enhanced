@@ -315,11 +315,11 @@ def registry_class(cls, run=command):
                     item[key] = f"0x{value:x}"
             audio_devices.append(item)
         result["pci_audio_class_devices"] = audio_devices
-        result["pci_dsp_audio_class_candidates"] = subclasses.count(0x0401)
-        result["pci_hda_class_candidates"] = subclasses.count(0x0403)
+        result["pci_audio_class_0401_candidates"] = subclasses.count(0x0401)
+        result["pci_audio_class_0403_candidates"] = subclasses.count(0x0403)
         result["pci_audio_class_candidates"] = (
-            result["pci_dsp_audio_class_candidates"] +
-            result["pci_hda_class_candidates"])
+            result["pci_audio_class_0401_candidates"] +
+            result["pci_audio_class_0403_candidates"])
         result["pci_audio_class_status"] = "observed" if class_codes else "unavailable"
         result["pci_display_class_candidates"] = len(display_subclasses)
         result["pci_display_class_status"] = "observed" if class_codes else "unavailable"
