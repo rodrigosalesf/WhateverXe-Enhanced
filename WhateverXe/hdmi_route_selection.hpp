@@ -149,4 +149,40 @@ bool readPinConnections(Reader &reader, unsigned address, unsigned pin,
     selected = selection;
     return true;
 }
+
+// Read-only discovery on a caller-bound codec; no guessed address or pin.
+template<class Reader>
+bool discover(Reader &reader, unsigned address, unsigned vendor, unsigned pin,
+              Route &route, PcmCaps &pcm) {
+    if (address > 14 || (vendor >> 16) != 0x8086 || !pin || pin > 127) return false;
+    unsigned actual = 0, root = 0;
+    if (!reader.get(address,0,0xF00,0,actual) || actual != vendor ||
+        !reader.get(address,0,0xF00,4,root) || root == 0xFFFFFFFFU) return false;
+    const unsigned first = (root >> 16) & 255U, groups = root & 255U;
+    if (!first || first > 127 || !groups || groups > 128U-first) return false;
+    unsigned afg = 0, start = 0, count = 0;
+    for (unsigned g = first; g < first+groups; ++g) {
+        unsigned type = 0, children = 0;
+        if (!reader.get(address,g,0xF00,5,type) || type == 0xFFFFFFFFU) return false;
+        if ((type & 255U) != 1) continue;
+        if (!reader.get(address,g,0xF00,4,children) || children == 0xFFFFFFFFU) return false;
+        const unsigned s = (children >> 16) & 255U, n = children & 255U;
+        if (!s || s > 127 || !n || n > 128U-s) return false;
+        if (pin >= s && pin-s < n) {
+            if (afg) return false;
+            afg = g; start = s; count = n;
+        }
+    }
+    if (!afg) return false;
+    unsigned nodes[127] {};
+    size_t used = 0, selected = 0;
+    if (!readPinConnections(reader,address,pin,nodes,used,selected)) return false;
+    for (size_t i = 0; i < used; ++i)
+        if (nodes[i] < start || nodes[i]-start >= count) return false;
+    Route candidate {address,pin,nodes[selected]};
+    PcmCaps caps {};
+    if (!readInheritedPcm(reader,candidate,afg,caps)) return false;
+    route = candidate; pcm = caps;
+    return true;
+}
 }

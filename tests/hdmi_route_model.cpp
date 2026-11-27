@@ -21,7 +21,39 @@ struct PinReader {
         return true;
     }
 };
+struct DiscoveryReader {
+    unsigned vendor {0x8086281C}, converterCaps {0x200};
+    bool get(unsigned address, unsigned nid, unsigned verb, unsigned param, unsigned &out) {
+        if (address != 2) return false;
+        if (verb == 0xF02 && nid == 8) { out = 0x0503; return true; }
+        if (verb == 0xF01 && nid == 8) { out = 1; return true; }
+        if (verb != 0xF00) return false;
+        if (nid == 0 && param == 0) out = vendor;
+        else if (nid == 0 && param == 4) out = 0x10001;
+        else if (nid == 1 && param == 5) out = 1;
+        else if (nid == 1 && param == 4) out = 0x30006;
+        else if (nid == 8 && param == 9) out = 0x400300;
+        else if (nid == 8 && param == 14) out = 2;
+        else if (nid == 5 && param == 9) out = converterCaps;
+        else if ((nid == 1 || nid == 5) && param == 10) out = 0x1A07F0;
+        else if ((nid == 1 || nid == 5) && param == 11) out = 1;
+        else return false;
+        return true;
+    }
+};
 int main() {
+    DiscoveryReader discovery;
+    Route found {};
+    PcmCaps inherited {};
+    assert(discover(discovery,2,0x8086281C,8,found,inherited));
+    assert(found.converter == 5 && inherited.ratesAndDepths == 0x1A07F0);
+    discovery.converterCaps = 0x210;
+    assert(discover(discovery,2,0x8086281C,8,found,inherited));
+    discovery.converterCaps = 0;
+    assert(!discover(discovery,2,0x8086281C,8,found,inherited));
+    discovery.vendor = 0x10EC0256;
+    assert(!discover(discovery,2,0x8086281C,8,found,inherited));
+
     PinReader pinReader;
     unsigned nodes[127] {};
     size_t count = 0, selected = 0;
