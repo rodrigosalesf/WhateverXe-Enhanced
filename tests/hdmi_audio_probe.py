@@ -192,6 +192,11 @@ class ProbeTests(unittest.TestCase):
                          {"status": "invalid-response", "reason": "malformed-plist"})
         self.assertEqual(report["audio_outputs"], {"status": "invalid-response"})
 
+    def test_empty_registry_response_is_not_called_malformed(self):
+        result = probe.registry_class(
+            "AppleGFXHDA", lambda args, timeout=15: b"")
+        self.assertEqual(result, {"status": "invalid-response", "reason": "empty-response"})
+
     def test_registry_invalid_shapes_have_redacted_reasons(self):
         cases = ((plistlib.dumps({"private": "value"}), "unexpected-root-type"),
                  (plistlib.dumps(["private-value"]), "unexpected-node-type"))

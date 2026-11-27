@@ -219,6 +219,8 @@ def registry_class(cls, run=command):
     raw = run(["/usr/sbin/ioreg", "-a", "-r", "-d", "1", "-c", cls])
     if raw is None:
         return {"status": "unavailable"}
+    if not raw:
+        return {"status": "invalid-response", "reason": "empty-response"}
     try:
         decoded = plistlib.loads(raw)
     except (ValueError, TypeError, OverflowError, plistlib.InvalidFileException, ExpatError):
