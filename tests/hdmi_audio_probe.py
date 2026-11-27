@@ -188,8 +188,18 @@ class ProbeTests(unittest.TestCase):
 
     def test_invalid_command_responses(self):
         report = probe.collect(lambda args, timeout=15: b"not a plist or JSON")
-        self.assertEqual(report["registry"]["AppleDisplay"], {"status": "invalid-response"})
+        self.assertEqual(report["registry"]["AppleDisplay"],
+                         {"status": "invalid-response", "reason": "malformed-plist"})
         self.assertEqual(report["audio_outputs"], {"status": "invalid-response"})
+
+    def test_registry_invalid_shapes_have_redacted_reasons(self):
+        cases = ((plistlib.dumps({"private": "value"}), "unexpected-root-type"),
+                 (plistlib.dumps(["private-value"]), "unexpected-node-type"))
+        for raw, reason in cases:
+            result = probe.registry_class(
+                "AppleGFXHDA", lambda args, timeout=15: raw)
+            self.assertEqual(result, {"status": "invalid-response", "reason": reason})
+            self.assertNotIn("private", json.dumps(result))
 
 
 class EldTests(unittest.TestCase):

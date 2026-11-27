@@ -221,9 +221,13 @@ def registry_class(cls, run=command):
         return {"status": "unavailable"}
     try:
         decoded = plistlib.loads(raw)
-        nodes = plist_nodes(decoded)
     except (ValueError, TypeError, OverflowError, plistlib.InvalidFileException, ExpatError):
-        return {"status": "invalid-response"}
+        return {"status": "invalid-response", "reason": "malformed-plist"}
+    if not isinstance(decoded, list):
+        return {"status": "invalid-response", "reason": "unexpected-root-type"}
+    if any(not isinstance(node, dict) for node in decoded):
+        return {"status": "invalid-response", "reason": "unexpected-node-type"}
+    nodes = plist_nodes(decoded)
     result = {"status": "observed", "count": len(nodes), "nodes": nodes}
     result["_hda_gfx_values"] = [token for node in decoded
                                   if (token := hda_gfx_value(node)) is not None]

@@ -95,11 +95,14 @@ do not prove that a codec answered a verb. A shared value is only evidence that 
 it does not establish IORegistry provider ownership, HDA codec response,
 AppleGFXHDA attachment, or playback. This collector does not read live ELD,
 inspect HDA verbs or interrupts, or change device state. Invalid class responses
-make the association result incomplete rather than implying that a property is
-absent. Present but unreadable `hda-gfx` properties also make the comparison
-incomplete; candidate counts include property-bearing nodes even when their
-values cannot be compared. A zero PCI audio-class count is qualified by whether
-PCI class codes were readable. Missing properties or classes are not proof that
+report only a redacted reason (`malformed-plist`, `unexpected-root-type` or
+`unexpected-node-type`) and make the association result incomplete rather than
+implying that a property is absent. These categories describe response shape,
+not the reason the service produced it. Present but unreadable `hda-gfx`
+properties also make the comparison incomplete; candidate counts include
+property-bearing nodes even when their values cannot be compared. A zero PCI
+audio-class count is qualified by whether PCI class codes were readable.
+Missing properties or classes are not proof that
 audio is unsupported. The investigation is informed by
 [jkbuha's contribution](https://github.com/b00t0x/WhateverXe/issues/150)
 and [initial findings](https://github.com/b00t0x/WhateverXe/issues/124).
