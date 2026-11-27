@@ -145,6 +145,8 @@ jobs:
           build/quality-bin/hdmi-route-model
           xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror tests/hdmi_wake_plan.cpp -o build/quality-bin/hdmi-wake-plan
           build/quality-bin/hdmi-wake-plan
+          xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror tests/hdmi_mmio_guard.cpp -o build/quality-bin/hdmi-mmio-guard
+          build/quality-bin/hdmi-mmio-guard
           bash -n tools/collect-hdmi-state.sh
       - name: CPU tests
         run: >-
