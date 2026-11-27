@@ -17,4 +17,20 @@ inline bool recover(const Snapshot &before, const Snapshot &now,
         return false;
     return restore(c,now.value,out);
 }
+
+// Register semantics cross-checked against Linux i915 intel_audio_regs.h.
+// Experimental macOS wake approach credited to jkbuha/WhateverXe-contrib.
+// These are plans only; powered must come from an independent audio lease.
+constexpr size_t PinBufferOffset = 0x48414;
+constexpr size_t CodecWakeOffset = 0x65f10;
+constexpr uint32_t PinBufferMask = 1U << 31;
+constexpr uint32_t CodecWakeMask = 1U << 15;
+constexpr unsigned WakeMinimumDelayUs = 1000;
+inline bool preparePinBuffer(const Snapshot &s, Change &out) {
+    return s.offset == PinBufferOffset && prepare(s, PinBufferMask, PinBufferMask, out);
+}
+inline bool prepareCodecWake(const Snapshot &s, bool enable, Change &out) {
+    return s.offset == CodecWakeOffset &&
+        prepare(s, CodecWakeMask, enable ? CodecWakeMask : 0U, out);
+}
 }
