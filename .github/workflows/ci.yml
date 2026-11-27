@@ -69,10 +69,13 @@ jobs:
           sdk="$(xcrun --sdk macosx --show-sdk-path)"
           "$tidy" tests/xelp_flight_recorder.cpp -- -std=c++17 -isysroot "$sdk"
           xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -fsyntax-only tests/xelp_flight_recorder.cpp
+          "$tidy" tests/hdmi_audio_payload.cpp -- -std=c++17 -IWhateverXe -isysroot "$sdk"
+          xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -IWhateverXe -fsyntax-only tests/hdmi_audio_payload.cpp
       - name: CPU tests
         run: >-
           python3 tools/test.py
           --require hdmi_audio_probe
+          --require hdmi_audio_payload
           --require hdmi_hotplug_replay
           --require gpu_telemetry_probe
           --require gpu_frequency_probe
