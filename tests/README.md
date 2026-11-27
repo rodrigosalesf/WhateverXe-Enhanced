@@ -83,6 +83,18 @@ These are parser/collector checks, not an AppleHDA, ELD, HDA verb, MMIO or
 hardware playback test.
 
 On macOS run `python3 tools/hdmi_audio_probe.py` for a read-only JSON snapshot.
+For controlled HDMI evidence, run
+`python3 tools/hdmi_audio_probe.py --hotplug-pair > hdmi-hotplug-pair.json`.
+Follow the prompts on stderr: disconnect HDMI, then reconnect to a powered
+TV with its HDMI input selected and wait for stable video before confirming.
+The two redacted snapshots retain per-query monotonic windows and operator
+confirmation times. Comparisons are aggregate class observations only, not
+unique devices; failed queries remain null and receive no delta. A zero
+classified HDMI/DP output count does not rule out an unclassified output.
+The captures are sequential, not atomic, and labels are not hardware hotplug
+events. Live ELD/pin-sense, provider identity and playback are not established.
+No kernel/EFI settings are changed. Three host-only regression cases cover
+timing/order and redaction, unavailable observations and cancellation.
 It reports selected properties and counts rather than raw EDID, device names,
 serials or machine identifiers. The snapshot counts PCI audio-class candidates
 with class codes 0401 and 0403 separately, including only their PCI vendor/device

@@ -6,6 +6,7 @@ import plistlib
 import subprocess
 import sys
 import platform
+import time
 from xml.parsers.expat import ExpatError
 
 CLASSES = ("AppleIntelFramebuffer", "AppleDisplay", "IODisplayConnect",
@@ -466,11 +467,97 @@ def collect(run=command):
     return report
 
 
+def hotplug_counts(report):
+    """Return comparable aggregate observations, never a connector identity."""
+    metrics = {}
+    for cls in ("AppleIntelFramebuffer", "AppleDisplay", "IODisplayConnect",
+                "AppleHDAController", "IOHDACodecDevice", "AppleGFXHDA", "IOAudioEngine"):
+        result = report["registry"][cls]
+        observed = result["status"] == "observed"
+        metrics[cls + ".count"] = result["count"] if observed else None
+        if cls in ("AppleIntelFramebuffer", "AppleDisplay", "IODisplayConnect"):
+            metrics[cls + ".audio_edid_observations"] = (
+                sum(node.get("edid_audio", {}).get("status") == "valid" and
+                    node["edid_audio"].get("advertises_audio") is True
+                    for node in result["nodes"]) if observed else None)
+    audio = report["audio_outputs"]
+    for transport in ("HDMI", "DisplayPort"):
+        metrics["CoreAudio." + transport + ".outputs"] = (
+            audio["transport_counts"].get(transport, 0)
+            if audio["status"] == "observed" else None)
+    return metrics
+
+
+def collect_hotplug_pair(confirm, run=command, monotonic_ns=time.monotonic_ns):
+    """Two operator-labelled snapshots; confirmation is not a hardware event."""
+    start = monotonic_ns()
+    stages = []
+    for phase in ("disconnected", "connected"):
+        if not confirm(phase):
+            raise ValueError("capture cancelled")
+        confirmed = monotonic_ns() - start
+        windows = []
+
+        def timed_run(args, timeout=15):
+            # Only fixed labels for the commands issued by collect().
+            if args[0] == "/usr/sbin/ioreg" and args[-1] in CLASSES:
+                label = args[-1]
+            elif args[0] == "/usr/bin/kmutil":
+                label = "audio-extensions"
+            elif args[0] == "/usr/sbin/system_profiler":
+                label = "CoreAudio"
+            else:
+                raise ValueError("unexpected diagnostic command")
+            began = monotonic_ns() - start
+            try:
+                return run(args, timeout)
+            finally:
+                windows.append({"source": label, "started_ns": began,
+                                "finished_ns": monotonic_ns() - start})
+
+        report = collect(timed_run)
+        stages.append({"operator_label": phase, "confirmed_ns": confirmed,
+                       "finished_ns": monotonic_ns() - start,
+                       "query_windows": windows, "snapshot": report})
+
+    before, after = (hotplug_counts(stage["snapshot"]) for stage in stages)
+    changes = {}
+    for key in before:
+        old, new = before[key], after[key]
+        item = {"before": old, "after": new}
+        if old is not None and new is not None:
+            item["count_delta"] = new - old
+        changes[key] = item
+    return {"schema": "wex-hdmi-hotplug-pair-v1", "stages": stages,
+            "count_comparison": changes,
+            "limitations": [
+                "Operator labels and confirmation times are not observed hardware hotplug events.",
+                "Query windows share a monotonic origin; captures are sequential, not atomic.",
+                "Counts are class observations, not unique devices or matched provider identities.",
+                "Zero classified HDMI/DP outputs does not exclude an unclassified output.",
+                "Unavailable queries stay null; absent or changed observations do not prove causation.",
+                "No live ELD bytes, pin-sense transaction, or audible playback is verified."
+            ]}
+
+
+def confirm_hotplug_phase(phase):
+    instructions = {
+        "disconnected": "Disconnect the external HDMI cable; press Enter when the system settles.",
+        "connected": "Reconnect HDMI to the powered TV, select its HDMI input and wait for video; press Enter when stable.",
+    }
+    print(instructions[phase] + " Any other input cancels.", file=sys.stderr, flush=True)
+    return sys.stdin.readline() == "\n"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--eld-file", help="offline binary ELD snapshot (no device access)")
     parser.add_argument("--edid-file", help="optional offline binary EDID snapshot to compare")
+    parser.add_argument("--hotplug-pair", action="store_true",
+                        help="capture disconnected/connected snapshots with operator confirmation")
     args = parser.parse_args()
+    if args.hotplug_pair and (args.edid_file or args.eld_file):
+        parser.error("--hotplug-pair cannot be combined with offline files")
     if args.edid_file and not args.eld_file:
         parser.error("--edid-file requires --eld-file")
     if args.eld_file:
@@ -493,7 +580,11 @@ def main():
         return 0 if eld["status"] == "valid" and report.get("edid", {"status": "valid"})["status"] == "valid" else 1
     if sys.platform != "darwin":
         parser.exit(2, "This diagnostic requires macOS.\n")
-    print(json.dumps(collect(), indent=2, sort_keys=True))
+    try:
+        report = collect_hotplug_pair(confirm_hotplug_phase) if args.hotplug_pair else collect()
+    except (ValueError, KeyboardInterrupt):
+        parser.exit(2, "Capture cancelled or invalid.\\n")
+    print(json.dumps(report, indent=2, sort_keys=True))
     return 0
 
 

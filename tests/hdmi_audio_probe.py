@@ -30,6 +30,81 @@ def cta(payload=b"", flags=0):
 
 
 class ProbeTests(unittest.TestCase):
+    def test_hotplug_pair_correlates_query_windows_and_redacts(self):
+        phase = []
+        ticks = iter(range(1000))
+        def confirm(label):
+            phase.append(label)
+            return True
+
+        def run(args, timeout=15):
+            connected = phase[-1] == "connected"
+            if args[0] == "/usr/sbin/ioreg":
+                if args[-1] == "AppleDisplay" and connected:
+                    return plistlib.dumps([{"IODisplayEDID": base(1) + cta(flags=0x40),
+                                            "serial-number": "private-display"}])
+                if args[-1] == "IOHDACodecDevice":
+                    return plistlib.dumps([{"IOHDACodecVendorID": 0x10ec0256}])
+                return plistlib.dumps([])
+            if args[0] == "/usr/bin/kmutil":
+                return b"as.vit9696.AppleALC\n"
+            return json.dumps({"SPAudioDataType": [{"_items": [
+                {"_name": "private-output", "coreaudio_device_output": 2,
+                 "coreaudio_device_transport": "HDMI" if connected else "Built-in"}
+            ]}]}).encode()
+
+        result = probe.collect_hotplug_pair(confirm, run, lambda: next(ticks))
+        self.assertEqual(result["schema"], "wex-hdmi-hotplug-pair-v1")
+        self.assertEqual(phase, ["disconnected", "connected"])
+        before, after = result["stages"]
+        for stage in (before, after):
+            windows = stage["query_windows"]
+            self.assertEqual([x["source"] for x in windows],
+                             [*probe.CLASSES, "audio-extensions", "CoreAudio"])
+            self.assertLessEqual(stage["confirmed_ns"], windows[0]["started_ns"])
+            self.assertLessEqual(windows[-1]["finished_ns"], stage["finished_ns"])
+            self.assertTrue(all(x["started_ns"] <= x["finished_ns"] for x in windows))
+        self.assertLess(before["finished_ns"], after["confirmed_ns"])
+        metrics = result["count_comparison"]
+        self.assertEqual(metrics["AppleDisplay.audio_edid_observations"],
+                         {"before": 0, "after": 1, "count_delta": 1})
+        self.assertEqual(metrics["CoreAudio.HDMI.outputs"],
+                         {"before": 0, "after": 1, "count_delta": 1})
+        self.assertEqual(metrics["IOHDACodecDevice.count"],
+                         {"before": 1, "after": 1, "count_delta": 0})
+        self.assertNotIn("private-", json.dumps(result))
+
+    def test_hotplug_pair_does_not_compare_unavailable_to_zero(self):
+        phase = []
+        def confirm(label):
+            phase.append(label)
+            return True
+        def run(args, timeout=15):
+            if phase[-1] == "disconnected":
+                return None
+            if args[0] == "/usr/sbin/ioreg":
+                return plistlib.dumps([])
+            if args[0] == "/usr/bin/kmutil":
+                return b"as.vit9696.AppleALC\n"
+            return b'{"SPAudioDataType": []}'
+
+        report = probe.collect_hotplug_pair(confirm, run)
+        for key in ("CoreAudio.HDMI.outputs", "AppleHDAController.count",
+                    "AppleDisplay.audio_edid_observations"):
+            self.assertEqual(report["count_comparison"][key], {"before": None, "after": 0})
+
+    def test_hotplug_pair_cancel_does_not_capture_unconfirmed_phase(self):
+        calls = []
+        def run(args, timeout=15):
+            calls.append(args)
+            return None
+        with self.assertRaises(ValueError):
+            probe.collect_hotplug_pair(lambda phase: False, run)
+        self.assertEqual(calls, [])
+        with self.assertRaises(ValueError):
+            probe.collect_hotplug_pair(lambda phase: phase == "disconnected", run)
+        self.assertEqual(len(calls), len(probe.CLASSES) + 2)
+
     def test_hda_status_mask_is_decoded_without_claiming_codec_response(self):
         summary = probe.summarize_node({"status-mask": 0x5})
         self.assertEqual(summary["status-mask"], "0x5")
