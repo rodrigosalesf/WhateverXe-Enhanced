@@ -15,6 +15,66 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
+  hdmi-reference-abi:
+    name: HDMI reference ABI audit (read only)
+    runs-on: macos-15-intel
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Audit pinned Sequoia framebuffer and available host AppleHDA binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          mkdir -p build/hdmi-reference-abi
+          donor="$tmp/AppleIntelTGLGraphicsFramebuffer"
+          curl --fail --location --silent --show-error --retry 2 --connect-timeout 15 --max-time 120 --output "$donor" \
+            'https://raw.githubusercontent.com/b00t0x/WhateverXe-Graphics/a558c561e06b2f78d675d16dd8f4303bf1c33fad/payloads/Sequoia/Library/Extensions/AppleIntelTGLGraphicsFramebuffer.kext/Contents/MacOS/AppleIntelTGLGraphicsFramebuffer'
+          test "$(git hash-object "$donor")" = '74baffa1f0ba577ae1c22345fd6011c1ca2d3863'
+          hda='/System/Library/Extensions/AppleHDA.kext/Contents'
+          rc=0
+          python3 tools/hdmi_audio_abi.py \
+            --controller "$hda/PlugIns/AppleHDAController.kext/Contents/MacOS/AppleHDAController" \
+            --applehda "$hda/MacOS/AppleHDA" --framebuffer "$donor" \
+            > build/hdmi-reference-abi/reference.json || rc=$?
+          if [[ "$rc" -ne 0 && "$rc" -ne 1 ]]; then
+            exit "$rc"
+          fi
+          # Exit 1 is an honest non-match/unavailable observation, not a pipeline fault.
+          # A successfully executed audit is not an ABI compatibility approval.
+          python3 - "$rc" <<'PY'
+          import json
+          import subprocess
+          import sys
+          from pathlib import Path
+          path = Path("build/hdmi-reference-abi/reference.json")
+          report = json.loads(path.read_text())
+          if report.get("schema") != 1 or report.get("kernel_activation_authorized") is not False:
+              raise SystemExit("unexpected ABI report schema")
+          if set(report.get("images", {})) != {"controller", "applehda", "framebuffer"}:
+              raise SystemExit("missing ABI audit results")
+          report["reference_provenance"] = {
+              "framebuffer_repository": "b00t0x/WhateverXe-Graphics",
+              "framebuffer_commit": "a558c561e06b2f78d675d16dd8f4303bf1c33fad",
+              "framebuffer_git_blob": "74baffa1f0ba577ae1c22345fd6011c1ca2d3863",
+              "host_product_version": subprocess.check_output(["/usr/bin/sw_vers", "-productVersion"], text=True).strip(),
+              "host_build_version": subprocess.check_output(["/usr/bin/sw_vers", "-buildVersion"], text=True).strip(),
+              "audit_exit_code": int(sys.argv[1]),
+              "target_hardware_verified": False,
+          }
+          path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+          print(path.read_text())
+          PY
+      - name: Upload ABI reference results (JSON only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: HDMI-reference-ABI
+          path: build/hdmi-reference-abi/reference.json
+          if-no-files-found: error
+
   build:
     name: Test and build
     runs-on: macos-15-intel
@@ -48,7 +108,7 @@ jobs:
           python3 -m venv build/quality-venv
           build/quality-venv/bin/python -m pip install --disable-pip-version-check --only-binary=:all: --no-deps ruff==0.11.13
           build/quality-venv/bin/ruff --version
-          for module in hdmi_audio_probe hdmi_hotplug_replay gpu_telemetry_probe gpu_frequency_probe gpu_rc6_probe display_power_probe frame_pacing_probe gpu_memory_probe install_preflight; do
+          for module in hdmi_audio_probe hdmi_audio_abi hdmi_hotplug_replay gpu_telemetry_probe gpu_frequency_probe gpu_rc6_probe display_power_probe frame_pacing_probe gpu_memory_probe install_preflight; do
             build/quality-venv/bin/ruff check "tools/$module.py" "tests/$module.py"
           done
           build/quality-venv/bin/ruff check tests/xelp_flight_recorder_mutants.py
@@ -69,10 +129,14 @@ jobs:
           sdk="$(xcrun --sdk macosx --show-sdk-path)"
           "$tidy" tests/xelp_flight_recorder.cpp -- -std=c++17 -isysroot "$sdk"
           xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -fsyntax-only tests/xelp_flight_recorder.cpp
+          "$tidy" tests/hdmi_audio_payload.cpp -- -std=c++17 -IWhateverXe -isysroot "$sdk"
+          xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -IWhateverXe -fsyntax-only tests/hdmi_audio_payload.cpp
       - name: CPU tests
         run: >-
           python3 tools/test.py
           --require hdmi_audio_probe
+          --require hdmi_audio_payload
+          --require hdmi_audio_abi
           --require hdmi_hotplug_replay
           --require gpu_telemetry_probe
           --require gpu_frequency_probe

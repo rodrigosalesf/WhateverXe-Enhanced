@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.6-enhanced-e5 (experimental candidate)
+
+- Integrates upstream 0.8.6 and the E5 read-only diagnostics, scoped graphics restoration safeguards, Metal validation tools and installation preflight.
+- Adds redacted paired HDMI observations, offline native HDMI payload and transaction preparation, and reference ABI auditing. No active HDMI audio fix or new audio hooks; actual playback remains unresolved.
+- Adds memory-counter anomaly and temporal diagnostics without modifying allocation accounting.
+- See [E5 finalization and deferred qualification](E5-FINALIZATION.md). Publication requires combined CI and artifact verification; no new hardware qualification or performance claim.
+
 ## 0.8.6
 
 Use with WhateverXe Graphics 0.4.5.
