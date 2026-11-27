@@ -10,7 +10,33 @@ struct Reader {
         return true;
     }
 };
+struct PinReader {
+    unsigned length {2}, word {0x8503}, selection {2};
+    bool get(unsigned address, unsigned nid, unsigned verb, unsigned param, unsigned &out) {
+        assert(address == 2 && nid == 8);
+        if (verb == 0xF00) out = param == 9 ? 0x400300 : length;
+        else if (verb == 0xF02) out = word;
+        else if (verb == 0xF01) out = selection;
+        else return false;
+        return true;
+    }
+};
 int main() {
+    PinReader pinReader;
+    unsigned nodes[127] {};
+    size_t count = 0, selected = 0;
+    assert(readPinConnections(pinReader,2,8,nodes,count,selected));
+    assert(count == 3 && selected == 2 && nodes[0] == 3 && nodes[2] == 5);
+    pinReader.length = 0x82;
+    pinReader.word = 0x80050003;
+    assert(readPinConnections(pinReader,2,8,nodes,count,selected));
+    pinReader.selection = 3;
+    assert(!readPinConnections(pinReader,2,8,nodes,count,selected));
+    pinReader.selection = 0;
+    pinReader.word = 0x80020003;
+    assert(!readPinConnections(pinReader,2,8,nodes,count,selected));
+    assert(count == 3 && selected == 2);
+
     Reader reader;
     PcmCaps pcm {};
     Route route {2,4,3};
