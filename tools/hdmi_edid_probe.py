@@ -1,5 +1,6 @@
 """Offline EDID audio capability probe. No kernel or hardware access."""
 import unittest
+from hdmi_audio_probe import eld_audio, edid_audio, compare_audio_evidence
 
 def audio_caps(data):
     if len(data) < 128 or data[:8] != bytes.fromhex("00ffffffffffff00"):
@@ -45,7 +46,39 @@ def fixture(payload=b"", flags=0):
     ext[127] = -sum(ext) % 256
     return bytes(base+ext)
 
+def synthetic_eld(sads):
+    """Test fixture only; never a live codec payload."""
+    if len(sads) > 15 or any(len(sad) != 3 for sad in sads):
+        raise ValueError("invalid SAD list")
+    size = (20 + 3 * len(sads) + 3) // 4 * 4
+    data = bytearray(size)
+    data[0] = 2 << 3
+    data[2] = (size - 4) // 4
+    data[5] = len(sads) << 4
+    for i, sad in enumerate(sads):
+        data[20 + 3*i:23 + 3*i] = bytes(sad)
+    return bytes(data)
+
+
 class Tests(unittest.TestCase):
+    def test_eld_roundtrip(self):
+        edid = edid_audio(fixture(bytes((35,9,7,1)),64))
+        eld = eld_audio(synthetic_eld(((9,7,1),)))
+        self.assertEqual(eld["status"], "valid")
+        self.assertEqual(eld["stereo_pcm16_rates_hz"], [32000,44100,48000])
+        self.assertEqual(compare_audio_evidence(edid, eld)["common_stereo_pcm16_rates_hz"],
+                         [32000,44100,48000])
+
+    def test_eld_truncation(self):
+        data = synthetic_eld(((9,7,1),))
+        for size in range(len(data)):
+            self.assertNotEqual(eld_audio(data[:size])["status"], "valid")
+
+    def test_eld_bounds(self):
+        for sads in (((9,7),), ((9,7,1),)*16):
+            with self.assertRaises(ValueError):
+                synthetic_eld(sads)
+
     def test_audio(self):
         self.assertEqual(audio_caps(fixture(bytes((35,9,7,1)),64)), (True,((9,7,1),)))
     def test_no_audio(self):
