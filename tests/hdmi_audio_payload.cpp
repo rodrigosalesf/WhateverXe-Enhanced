@@ -344,6 +344,15 @@ int main() {
     invalidExpected.codecId = 0x10ec0256;
     assert(admitRoute(candidates, 1, invalidExpected) == RouteAdmission::rejected);
 
+    // Matching evidence must not admit a reserved codec address.
+    const unsigned codecAddresses[] {0U, 14U, 15U, 16U, 255U};
+    for (unsigned address : codecAddresses) {
+        auto boundary = route;
+        boundary.codecAddress = static_cast<uint8_t>(address);
+        assert(admitRoute(&boundary, 1, boundary) ==
+               (address <= 14 ? RouteAdmission::unique : RouteAdmission::rejected));
+    }
+
     // Lifecycle tests use only the software session, never a live codec.
     LinkAudioSession session {route.connector};
     auto live = route;
