@@ -24,7 +24,8 @@ code = r'''
 struct IOService {
  alignas(8) uint8_t bytes[0x4B90]{}; unsigned refs=1;
  IOService *getMetaClass(){return this;}
- unsigned getClassSize(){return sizeof(bytes);}
+ unsigned reportedSize=sizeof(bytes);
+ unsigned getClassSize(){return reportedSize;}
  const char *getClassName(){return "AppleIntelFramebuffer";}
  void retain(){++refs;} void release(){assert(refs>1);--refs;}
 };
@@ -92,6 +93,12 @@ struct Fixture {
  }
 };
 int main(){
+ {Fixture f;
+  f.ctl.reportedSize=0xD60;
+  assert(XE::wrapDisplay13SetPowerState(&f.fb[0],2)==kIOReturnSuccess);
+  assert(nativeCalls==1 && wakes[0]==1 && ons[0]==1);
+  assert(!wakes[1] && !wakes[2] && !ons[1] && !ons[2]);
+ }
  unsigned order[]={0,1,2};do{for(unsigned states=0;states<27;++states){
   Fixture f;unsigned power=states;
   for(auto &fb:f.fb){put(fb,0x4284,power%3);power/=3;}

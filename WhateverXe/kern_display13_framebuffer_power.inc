@@ -122,6 +122,7 @@ bool XE::ownedDisplay13Framebuffer(IOService *fb) const {
     return fb && display13FBLifecycleHooksReady && display13FBABIReady && display13PagingLayoutKnown &&
         !strcmp(fb->getMetaClass()->getClassName(),"AppleIntelFramebuffer") &&
         fb->getMetaClass()->getClassSize()>=0x4B90 && adlnTopologyController &&
+        adlnTopologyController->getMetaClass()->getClassSize()>=0x1C20 &&
         Display13FBMemory::field<IOService *>(fb,0x1D0)==adlnTopologyController &&
         Display13FBMemory::field<uint32_t>(fb,0x1DC)<3 &&
         Display13FBMemory::field<IOService *>(adlnTopologyController,0xD60+8*Display13FBMemory::field<uint32_t>(fb,0x1DC))==fb;
