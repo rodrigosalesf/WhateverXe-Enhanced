@@ -6,11 +6,12 @@ import plistlib
 import subprocess
 import sys
 import platform
+import time
 from xml.parsers.expat import ExpatError
 
 CLASSES = ("AppleIntelFramebuffer", "AppleDisplay", "IODisplayConnect",
            "AppleHDAController", "IOHDACodecDevice", "AppleGFXHDA",
-           "IOAudioEngine")
+           "IOAudioEngine", "IOPCIDevice")
 HEADER = bytes.fromhex("00ffffffffffff00")
 
 
@@ -137,6 +138,14 @@ def numeric_property(value):
     return None
 
 
+def pci_display_audio_subclass(code):
+    """Decode the recognized class/subclass from either supported PCI encoding."""
+    return next((candidate for candidate in
+                 ((code >> 16) & 0xffff, (code >> 8) & 0xffff)
+                 if candidate in (0x0401, 0x0403) or
+                 0x0300 <= candidate <= 0x03ff), None)
+
+
 def summarize_node(node):
     # Deliberately exclude raw EDID, names, serials, UUIDs, paths, and arbitrary properties.
     result = {}
@@ -145,6 +154,9 @@ def summarize_node(node):
         number = numeric_property(node.get(key))
         if number is not None:
             result[key] = f"0x{number:x}"
+            if key == "status-mask":
+                result["codec-status-mask-set-bits"] = [
+                    bit for bit in range(16) if number & (1 << bit)]
     if "IODisplayEDID" in node:
         result["edid_audio"] = edid_audio(node["IODisplayEDID"])
     if "hda-gfx" in node:
@@ -152,10 +164,111 @@ def summarize_node(node):
     return result
 
 
+def hda_controller_name_role(node):
+    """Reduce the controller's registry name to an allowlisted role only."""
+    value = node.get("IORegistryEntryName", node.get("name"))
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("ascii")
+        except UnicodeDecodeError:
+            return "other"
+    if not isinstance(value, str):
+        return "unavailable"
+    role = value.split("@", 1)[0]
+    return role if role in ("HDEF", "HDAU", "HDAS") else "other"
+
+
+def audio_extension_summary(raw):
+    """Report only whether the two relevant extension names were listed."""
+    if not isinstance(raw, bytes) or not raw:
+        return {"status": "unavailable"}
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        return {"status": "invalid-response"}
+    if not lines:
+        return {"status": "invalid-response"}
+    return {
+        "status": "observed",
+        "AppleALC": "loaded" if any("AppleALC" in line for line in lines) else "not-listed",
+        "AppleGFXHDA": "loaded" if any("AppleGFXHDA" in line for line in lines) else "not-listed",
+    }
+
+
 def plist_nodes(value):
     if not isinstance(value, list) or any(not isinstance(n, dict) for n in value):
         raise ValueError("unexpected registry plist")
     return [summarize_node(n) for n in value]
+
+
+def hda_gfx_value(node):
+    """Return a bounded comparison-only hda-gfx token; never include it in JSON."""
+    value = node.get("hda-gfx")
+    if isinstance(value, bytes):
+        if not 0 < len(value) <= 128:
+            return None
+        raw = value
+        try:
+            value = value.decode("ascii")
+        except UnicodeDecodeError:
+            return raw
+        if not value.isprintable():
+            return raw
+    if (not isinstance(value, str) or not value or len(value) > 128
+            or not value.isprintable()):
+        return None
+    return value
+
+
+def hda_gfx_value_category(node):
+    """Classify a property for diagnostics without returning its content."""
+    value = node.get("hda-gfx")
+    if isinstance(value, bytes):
+        if not value:
+            return "empty-data"
+        if len(value) > 128:
+            return "oversized-data"
+        try:
+            decoded = value.decode("ascii")
+        except UnicodeDecodeError:
+            return "non-ascii-data"
+        return "ascii-data" if decoded.isprintable() else "non-printable-data"
+    if isinstance(value, str):
+        if not value:
+            return "empty-string"
+        if len(value) > 128:
+            return "oversized-string"
+        return "printable-string" if value.isprintable() else "non-printable-string"
+    return "other-type"
+
+
+def hda_gfx_association(gpu_values, audio_values, service_status,
+                        gpu_property_count=None, audio_property_count=None):
+    """Compare candidate service properties without publishing their values."""
+    gpu = set(gpu_values)
+    audio = set(audio_values)
+    gpu_property_count = (len(gpu_values) if gpu_property_count is None
+                          else gpu_property_count)
+    audio_property_count = (len(audio_values) if audio_property_count is None
+                            else audio_property_count)
+    unreadable = (gpu_property_count != len(gpu_values) or
+                  audio_property_count != len(audio_values))
+    if any(status != "observed" for status in service_status.values()):
+        status = "incomplete"
+    elif unreadable:
+        status = "incomplete"
+    elif not gpu_property_count and not audio_property_count:
+        status = "not-observed"
+    elif not gpu_property_count or not audio_property_count:
+        status = "incomplete"
+    elif gpu & audio:
+        status = "shared-value-observed"
+    else:
+        status = "different-values-observed"
+    return {"status": status, "gpu_candidates": gpu_property_count,
+            "audio_candidates": audio_property_count,
+            "service_status": service_status,
+            "limitations": "Compares only hda-gfx values on selected service classes; it does not prove provider ownership or AppleGFXHDA attachment."}
 
 
 def command(args, timeout=15):
@@ -171,11 +284,91 @@ def registry_class(cls, run=command):
     raw = run(["/usr/sbin/ioreg", "-a", "-r", "-d", "1", "-c", cls])
     if raw is None:
         return {"status": "unavailable"}
+    if not raw:
+        return {"status": "invalid-response", "reason": "empty-response"}
     try:
-        nodes = plist_nodes(plistlib.loads(raw))
+        decoded = plistlib.loads(raw)
     except (ValueError, TypeError, OverflowError, plistlib.InvalidFileException, ExpatError):
-        return {"status": "invalid-response"}
-    return {"status": "observed", "count": len(nodes), "nodes": nodes}
+        return {"status": "invalid-response", "reason": "malformed-plist"}
+    if not isinstance(decoded, list):
+        return {"status": "invalid-response", "reason": "unexpected-root-type"}
+    if any(not isinstance(node, dict) for node in decoded):
+        return {"status": "invalid-response", "reason": "unexpected-node-type"}
+    nodes = plist_nodes(decoded)
+    result = {"status": "observed", "count": len(nodes), "nodes": nodes}
+    result["_hda_gfx_values"] = [token for node in decoded
+                                  if (token := hda_gfx_value(node)) is not None]
+    result["_hda_gfx_property_count"] = sum(
+        "hda-gfx" in node for node in decoded)
+    if cls == "AppleHDAController":
+        roles = {}
+        for node in decoded:
+            role = hda_controller_name_role(node)
+            roles[role] = roles.get(role, 0) + 1
+        result["controller_name_roles"] = roles
+    if cls == "IOPCIDevice":
+        class_codes = [numeric_property(node.get("class-code")) for node in decoded]
+        class_codes = [code for code in class_codes if code is not None]
+        result["pci_class_code_observations"] = len(class_codes)
+        audio_devices = []
+        subclasses = []
+        audio_hda_gfx_values = []
+        audio_hda_gfx_property_count = 0
+        audio_hda_gfx_categories = {}
+        display_subclasses = []
+        display_hda_gfx_values = []
+        display_hda_gfx_property_count = 0
+        display_hda_gfx_categories = {}
+        for node in decoded:
+            code = numeric_property(node.get("class-code"))
+            if code is None:
+                continue
+            subclass = pci_display_audio_subclass(code)
+            if subclass is None:
+                continue
+            if 0x0300 <= subclass <= 0x03ff:
+                display_subclasses.append(subclass)
+                if "hda-gfx" in node:
+                    display_hda_gfx_property_count += 1
+                    category = hda_gfx_value_category(node)
+                    display_hda_gfx_categories[category] = (
+                        display_hda_gfx_categories.get(category, 0) + 1)
+                    token = hda_gfx_value(node)
+                    if token is not None:
+                        display_hda_gfx_values.append(token)
+                continue
+            subclasses.append(subclass)
+            if "hda-gfx" in node:
+                audio_hda_gfx_property_count += 1
+                category = hda_gfx_value_category(node)
+                audio_hda_gfx_categories[category] = (
+                    audio_hda_gfx_categories.get(category, 0) + 1)
+                token = hda_gfx_value(node)
+                if token is not None:
+                    audio_hda_gfx_values.append(token)
+            item = {"class-code": f"0x{subclass:x}"}
+            for key in ("vendor-id", "device-id"):
+                value = numeric_property(node.get(key))
+                if value is not None:
+                    item[key] = f"0x{value:x}"
+            audio_devices.append(item)
+        result["pci_audio_class_devices"] = audio_devices
+        result["pci_audio_class_0401_candidates"] = subclasses.count(0x0401)
+        result["pci_audio_class_0403_candidates"] = subclasses.count(0x0403)
+        result["pci_audio_class_candidates"] = (
+            result["pci_audio_class_0401_candidates"] +
+            result["pci_audio_class_0403_candidates"])
+        result["pci_audio_class_status"] = "observed" if class_codes else "unavailable"
+        result["pci_display_class_candidates"] = len(display_subclasses)
+        result["pci_display_class_status"] = "observed" if class_codes else "unavailable"
+        result["pci_display_hda_gfx_value_categories"] = display_hda_gfx_categories
+        result["pci_audio_hda_gfx_value_categories"] = audio_hda_gfx_categories
+        result["_pci_audio_hda_gfx_values"] = audio_hda_gfx_values
+        result["_pci_audio_hda_gfx_property_count"] = audio_hda_gfx_property_count
+        result["_pci_display_hda_gfx_values"] = display_hda_gfx_values
+        result["_pci_display_hda_gfx_property_count"] = display_hda_gfx_property_count
+        result["nodes"] = []  # PCI enumeration is summarized; device inventory is not emitted.
+    return result
 
 
 def audio_output_summary(value):
@@ -208,8 +401,61 @@ def audio_output_summary(value):
 
 
 def collect(run=command):
-    report = {"schema": 1, "macos": platform.mac_ver()[0],
-              "registry": {cls: registry_class(cls, run) for cls in CLASSES}}
+    registry = {cls: registry_class(cls, run) for cls in CLASSES}
+    kexts = run(["/usr/bin/kmutil", "showloaded", "--list-only"], 30)
+    extension_summary = audio_extension_summary(kexts)
+    gpu_values = []
+    gpu_property_count = 0
+    for cls in ("AppleIntelFramebuffer",):
+        gpu_values.extend(registry[cls].pop("_hda_gfx_values", []))
+        gpu_property_count += registry[cls].pop("_hda_gfx_property_count", 0)
+    audio_values = []
+    audio_property_count = 0
+    for cls in ("AppleHDAController", "AppleGFXHDA"):
+        audio_values.extend(registry[cls].pop("_hda_gfx_values", []))
+        audio_property_count += registry[cls].pop("_hda_gfx_property_count", 0)
+    pci_audio_values = registry["IOPCIDevice"].pop("_pci_audio_hda_gfx_values", [])
+    pci_audio_property_count = registry["IOPCIDevice"].pop(
+        "_pci_audio_hda_gfx_property_count", 0)
+    pci_display_values = registry["IOPCIDevice"].pop("_pci_display_hda_gfx_values", [])
+    pci_display_property_count = registry["IOPCIDevice"].pop(
+        "_pci_display_hda_gfx_property_count", 0)
+    for result in registry.values():
+        result.pop("_hda_gfx_values", None)
+        result.pop("_hda_gfx_property_count", None)
+        result.pop("_pci_audio_hda_gfx_values", None)
+        result.pop("_pci_audio_hda_gfx_property_count", None)
+        result.pop("_pci_display_hda_gfx_values", None)
+        result.pop("_pci_display_hda_gfx_property_count", None)
+    association_classes = {"AppleIntelFramebuffer": registry["AppleIntelFramebuffer"]["status"],
+                           "AppleHDAController": registry["AppleHDAController"]["status"],
+                           "AppleGFXHDA": registry["AppleGFXHDA"]["status"]}
+    report = {"schema": 1, "macos": platform.mac_ver()[0], "registry": registry,
+              "audio_extensions": extension_summary,
+              "hda_gfx_association": hda_gfx_association(
+                  gpu_values, audio_values, association_classes,
+                  gpu_property_count, audio_property_count)}
+    pci_audio_association = hda_gfx_association(
+        gpu_values, pci_audio_values,
+        {"AppleIntelFramebuffer": registry["AppleIntelFramebuffer"]["status"],
+         "PCI audio-class candidates": registry["IOPCIDevice"].get(
+             "pci_audio_class_status", "unavailable")},
+        gpu_property_count, pci_audio_property_count)
+    pci_audio_association["limitations"] = (
+        "Compares only hda-gfx values on AppleIntelFramebuffer and PCI audio-class candidates; "
+        "it does not prove provider ownership, AppleGFXHDA attachment, or playback.")
+    report["pci_audio_hda_gfx_association"] = pci_audio_association
+    pci_display_audio_association = hda_gfx_association(
+        pci_display_values, pci_audio_values,
+        {"PCI display-class candidates": registry["IOPCIDevice"].get(
+             "pci_display_class_status", "unavailable"),
+         "PCI audio-class candidates": registry["IOPCIDevice"].get(
+             "pci_audio_class_status", "unavailable")},
+        pci_display_property_count, pci_audio_property_count)
+    pci_display_audio_association["limitations"] = (
+        "Compares only hda-gfx values on PCI display-class and audio-class candidates; "
+        "it does not prove provider ownership, AppleGFXHDA attachment, or playback.")
+    report["pci_display_audio_hda_gfx_association"] = pci_display_audio_association
     raw = run(["/usr/sbin/system_profiler", "SPAudioDataType", "-json"], 30)
     try:
         report["audio_outputs"] = audio_output_summary(json.loads(raw)) if raw is not None else {"status": "unavailable"}
@@ -221,11 +467,97 @@ def collect(run=command):
     return report
 
 
+def hotplug_counts(report):
+    """Return comparable aggregate observations, never a connector identity."""
+    metrics = {}
+    for cls in ("AppleIntelFramebuffer", "AppleDisplay", "IODisplayConnect",
+                "AppleHDAController", "IOHDACodecDevice", "AppleGFXHDA", "IOAudioEngine"):
+        result = report["registry"][cls]
+        observed = result["status"] == "observed"
+        metrics[cls + ".count"] = result["count"] if observed else None
+        if cls in ("AppleIntelFramebuffer", "AppleDisplay", "IODisplayConnect"):
+            metrics[cls + ".audio_edid_observations"] = (
+                sum(node.get("edid_audio", {}).get("status") == "valid" and
+                    node["edid_audio"].get("advertises_audio") is True
+                    for node in result["nodes"]) if observed else None)
+    audio = report["audio_outputs"]
+    for transport in ("HDMI", "DisplayPort"):
+        metrics["CoreAudio." + transport + ".outputs"] = (
+            audio["transport_counts"].get(transport, 0)
+            if audio["status"] == "observed" else None)
+    return metrics
+
+
+def collect_hotplug_pair(confirm, run=command, monotonic_ns=time.monotonic_ns):
+    """Two operator-labelled snapshots; confirmation is not a hardware event."""
+    start = monotonic_ns()
+    stages = []
+    for phase in ("disconnected", "connected"):
+        if not confirm(phase):
+            raise ValueError("capture cancelled")
+        confirmed = monotonic_ns() - start
+        windows = []
+
+        def timed_run(args, timeout=15):
+            # Only fixed labels for the commands issued by collect().
+            if args[0] == "/usr/sbin/ioreg" and args[-1] in CLASSES:
+                label = args[-1]
+            elif args[0] == "/usr/bin/kmutil":
+                label = "audio-extensions"
+            elif args[0] == "/usr/sbin/system_profiler":
+                label = "CoreAudio"
+            else:
+                raise ValueError("unexpected diagnostic command")
+            began = monotonic_ns() - start
+            try:
+                return run(args, timeout)
+            finally:
+                windows.append({"source": label, "started_ns": began,
+                                "finished_ns": monotonic_ns() - start})
+
+        report = collect(timed_run)
+        stages.append({"operator_label": phase, "confirmed_ns": confirmed,
+                       "finished_ns": monotonic_ns() - start,
+                       "query_windows": windows, "snapshot": report})
+
+    before, after = (hotplug_counts(stage["snapshot"]) for stage in stages)
+    changes = {}
+    for key in before:
+        old, new = before[key], after[key]
+        item = {"before": old, "after": new}
+        if old is not None and new is not None:
+            item["count_delta"] = new - old
+        changes[key] = item
+    return {"schema": "wex-hdmi-hotplug-pair-v1", "stages": stages,
+            "count_comparison": changes,
+            "limitations": [
+                "Operator labels and confirmation times are not observed hardware hotplug events.",
+                "Query windows share a monotonic origin; captures are sequential, not atomic.",
+                "Counts are class observations, not unique devices or matched provider identities.",
+                "Zero classified HDMI/DP outputs does not exclude an unclassified output.",
+                "Unavailable queries stay null; absent or changed observations do not prove causation.",
+                "No live ELD bytes, pin-sense transaction, or audible playback is verified."
+            ]}
+
+
+def confirm_hotplug_phase(phase):
+    instructions = {
+        "disconnected": "Disconnect the external HDMI cable; press Enter when the system settles.",
+        "connected": "Reconnect HDMI to the powered TV, select its HDMI input and wait for video; press Enter when stable.",
+    }
+    print(instructions[phase] + " Any other input cancels.", file=sys.stderr, flush=True)
+    return sys.stdin.readline() == "\n"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--eld-file", help="offline binary ELD snapshot (no device access)")
     parser.add_argument("--edid-file", help="optional offline binary EDID snapshot to compare")
+    parser.add_argument("--hotplug-pair", action="store_true",
+                        help="capture disconnected/connected snapshots with operator confirmation")
     args = parser.parse_args()
+    if args.hotplug_pair and (args.edid_file or args.eld_file):
+        parser.error("--hotplug-pair cannot be combined with offline files")
     if args.edid_file and not args.eld_file:
         parser.error("--edid-file requires --eld-file")
     if args.eld_file:
@@ -248,7 +580,11 @@ def main():
         return 0 if eld["status"] == "valid" and report.get("edid", {"status": "valid"})["status"] == "valid" else 1
     if sys.platform != "darwin":
         parser.exit(2, "This diagnostic requires macOS.\n")
-    print(json.dumps(collect(), indent=2, sort_keys=True))
+    try:
+        report = collect_hotplug_pair(confirm_hotplug_phase) if args.hotplug_pair else collect()
+    except (ValueError, KeyboardInterrupt):
+        parser.exit(2, "Capture cancelled or invalid.\\n")
+    print(json.dumps(report, indent=2, sort_keys=True))
     return 0
 
 

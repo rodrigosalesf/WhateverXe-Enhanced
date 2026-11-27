@@ -83,9 +83,55 @@ These are parser/collector checks, not an AppleHDA, ELD, HDA verb, MMIO or
 hardware playback test.
 
 On macOS run `python3 tools/hdmi_audio_probe.py` for a read-only JSON snapshot.
+For controlled HDMI evidence, run
+`python3 tools/hdmi_audio_probe.py --hotplug-pair > hdmi-hotplug-pair.json`.
+Follow the prompts on stderr: disconnect HDMI, then reconnect to a powered
+TV with its HDMI input selected and wait for stable video before confirming.
+The two redacted snapshots retain per-query monotonic windows and operator
+confirmation times. Comparisons are aggregate class observations only, not
+unique devices; failed queries remain null and receive no delta. A zero
+classified HDMI/DP output count does not rule out an unclassified output.
+The captures are sequential, not atomic, and labels are not hardware hotplug
+events. Live ELD/pin-sense, provider identity and playback are not established.
+No kernel/EFI settings are changed. Three host-only regression cases cover
+timing/order and redaction, unavailable observations and cancellation.
 It reports selected properties and counts rather than raw EDID, device names,
-serials or machine identifiers. Missing properties or classes are not proof
-that audio is unsupported. The investigation is informed by
+serials or machine identifiers. The snapshot counts PCI audio-class candidates
+with class codes 0401 and 0403 separately, including only their PCI vendor/device
+IDs and class codes. A class code alone does not prove driver binding or a
+specific controller function. The snapshot also
+compares `hda-gfx` values on `AppleIntelFramebuffer`,
+`AppleHDAController` and `AppleGFXHDA` services. The values themselves are
+never emitted. A separate comparison checks the GPU framebuffer against
+`hda-gfx` properties on PCI class 0401/0403 candidates; it does not assume that
+a class 0401 candidate is an HDMI codec or prove provider ownership. Another
+comparison checks the property directly between PCI display-class and
+PCI audio-class candidates. The HDA `status-mask` is also reported with its set
+bit positions, beside observed codec addresses and vendor IDs; these registry
+properties alone do not prove that a codec answered a verb. A shared value is
+only evidence that candidate properties match;
+it does not establish IORegistry provider ownership, HDA codec response,
+AppleGFXHDA attachment, or playback. This collector does not read live ELD,
+inspect HDA verbs or interrupts, or change device state. Invalid class responses
+report only a redacted reason (`empty-response`, `malformed-plist`,
+`unexpected-root-type` or `unexpected-node-type`) and make the association
+result incomplete rather than implying that a property is absent. These
+categories describe response shape,
+not the reason the service produced it. Present but unreadable `hda-gfx`
+properties also make the comparison incomplete; candidate counts include
+property-bearing nodes even when their values cannot be compared. PCI candidate
+summaries include counts of redacted `hda-gfx` value categories (printable
+string, ASCII data, empty, oversized, non-printable, non-ASCII data or other
+type) to explain why a value could not be compared without recording it. Bounded
+binary values are compared in memory for equality; only the shared/different
+result is reported, and the bytes are never serialized. A zero PCI
+audio-class count is qualified by whether PCI class codes were readable.
+The snapshot also reduces `kmutil showloaded` to loaded/not-listed states for
+AppleALC and AppleGFXHDA, and controller registry names to the roles HDEF, HDAU,
+HDAS, other or unavailable. It does not emit extension identifiers, versions,
+paths or controller names; these states do not prove service attachment.
+Missing properties or classes are not proof that
+audio is unsupported. The investigation is informed by
 [jkbuha's contribution](https://github.com/b00t0x/WhateverXe/issues/150)
 and [initial findings](https://github.com/b00t0x/WhateverXe/issues/124).
 No codec wake, donor hooks or kernel changes are included.

@@ -30,6 +30,86 @@ def cta(payload=b"", flags=0):
 
 
 class ProbeTests(unittest.TestCase):
+    def test_hotplug_pair_correlates_query_windows_and_redacts(self):
+        phase = []
+        ticks = iter(range(1000))
+        def confirm(label):
+            phase.append(label)
+            return True
+
+        def run(args, timeout=15):
+            connected = phase[-1] == "connected"
+            if args[0] == "/usr/sbin/ioreg":
+                if args[-1] == "AppleDisplay" and connected:
+                    return plistlib.dumps([{"IODisplayEDID": base(1) + cta(flags=0x40),
+                                            "serial-number": "private-display"}])
+                if args[-1] == "IOHDACodecDevice":
+                    return plistlib.dumps([{"IOHDACodecVendorID": 0x10ec0256}])
+                return plistlib.dumps([])
+            if args[0] == "/usr/bin/kmutil":
+                return b"as.vit9696.AppleALC\n"
+            return json.dumps({"SPAudioDataType": [{"_items": [
+                {"_name": "private-output", "coreaudio_device_output": 2,
+                 "coreaudio_device_transport": "HDMI" if connected else "Built-in"}
+            ]}]}).encode()
+
+        result = probe.collect_hotplug_pair(confirm, run, lambda: next(ticks))
+        self.assertEqual(result["schema"], "wex-hdmi-hotplug-pair-v1")
+        self.assertEqual(phase, ["disconnected", "connected"])
+        before, after = result["stages"]
+        for stage in (before, after):
+            windows = stage["query_windows"]
+            self.assertEqual([x["source"] for x in windows],
+                             [*probe.CLASSES, "audio-extensions", "CoreAudio"])
+            self.assertLessEqual(stage["confirmed_ns"], windows[0]["started_ns"])
+            self.assertLessEqual(windows[-1]["finished_ns"], stage["finished_ns"])
+            self.assertTrue(all(x["started_ns"] <= x["finished_ns"] for x in windows))
+        self.assertLess(before["finished_ns"], after["confirmed_ns"])
+        metrics = result["count_comparison"]
+        self.assertEqual(metrics["AppleDisplay.audio_edid_observations"],
+                         {"before": 0, "after": 1, "count_delta": 1})
+        self.assertEqual(metrics["CoreAudio.HDMI.outputs"],
+                         {"before": 0, "after": 1, "count_delta": 1})
+        self.assertEqual(metrics["IOHDACodecDevice.count"],
+                         {"before": 1, "after": 1, "count_delta": 0})
+        self.assertNotIn("private-", json.dumps(result))
+
+    def test_hotplug_pair_does_not_compare_unavailable_to_zero(self):
+        phase = []
+        def confirm(label):
+            phase.append(label)
+            return True
+        def run(args, timeout=15):
+            if phase[-1] == "disconnected":
+                return None
+            if args[0] == "/usr/sbin/ioreg":
+                return plistlib.dumps([])
+            if args[0] == "/usr/bin/kmutil":
+                return b"as.vit9696.AppleALC\n"
+            return b'{"SPAudioDataType": []}'
+
+        report = probe.collect_hotplug_pair(confirm, run)
+        for key in ("CoreAudio.HDMI.outputs", "AppleHDAController.count",
+                    "AppleDisplay.audio_edid_observations"):
+            self.assertEqual(report["count_comparison"][key], {"before": None, "after": 0})
+
+    def test_hotplug_pair_cancel_does_not_capture_unconfirmed_phase(self):
+        calls = []
+        def run(args, timeout=15):
+            calls.append(args)
+            return None
+        with self.assertRaises(ValueError):
+            probe.collect_hotplug_pair(lambda phase: False, run)
+        self.assertEqual(calls, [])
+        with self.assertRaises(ValueError):
+            probe.collect_hotplug_pair(lambda phase: phase == "disconnected", run)
+        self.assertEqual(len(calls), len(probe.CLASSES) + 2)
+
+    def test_hda_status_mask_is_decoded_without_claiming_codec_response(self):
+        summary = probe.summarize_node({"status-mask": 0x5})
+        self.assertEqual(summary["status-mask"], "0x5")
+        self.assertEqual(summary["codec-status-mask-set-bits"], [0, 2])
+
     def test_base_only(self):
         result = probe.edid_audio(base(0))
         self.assertEqual(result["status"], "valid")
@@ -75,8 +155,21 @@ class ProbeTests(unittest.TestCase):
         registry = plistlib.dumps([{"IODisplayEDID": base(1) + cta(flags=0x40),
                                    "vendor-id": b"\x86\x80\x00\x00",
                                    "device-id": b"\xa3\x46\x00\x00",
+                                   "hda-gfx": "private-route-token",
                                    "IORegistryEntryName": "private-display",
                                    "serial-number": "private-serial"}])
+        gpu_registry = plistlib.dumps([{"hda-gfx": "private-route-token"}])
+        audio_registry = plistlib.dumps([{"hda-gfx": "private-route-token",
+                                          "IORegistryEntryName": "HDEF@1F,3"}])
+        pci_registry = plistlib.dumps([{"class-code": 0x04030000,
+                                        "vendor-id": 0x8086,
+                                        "device-id": 0x51c8,
+                                        "hda-gfx": "private-route-token",
+                                        "IORegistryEntryName": "private-pci-path"},
+                                       {"class-code": 0x03000000,
+                                        "hda-gfx": "private-route-token"},
+                                       {"class-code": 0x06040000,
+                                        "hda-gfx": "private-unrelated-token"}])
         audio = json.dumps({"SPAudioDataType": [{"_items": [
             {"_name": "private-monitor", "coreaudio_device_output": 2,
              "coreaudio_device_transport": "HDMI"},
@@ -85,18 +178,185 @@ class ProbeTests(unittest.TestCase):
         def run(args, timeout=15):
             calls.append(args)
             if args[0] == "/usr/sbin/ioreg":
-                return registry if args[-1] == "AppleDisplay" else plistlib.dumps([])
+                return {"AppleDisplay": registry,
+                        "AppleIntelFramebuffer": gpu_registry,
+                        "AppleHDAController": audio_registry,
+                        "IOPCIDevice": pci_registry}.get(args[-1], plistlib.dumps([]))
+            if args == ["/usr/bin/kmutil", "showloaded", "--list-only"]:
+                return b"as.vit9696.AppleALC\ncom.apple.driver.AppleGFXHDA\n"
             self.assertEqual(args, ["/usr/sbin/system_profiler", "SPAudioDataType", "-json"])
             return audio
         report = probe.collect(run)
-        self.assertEqual(len(calls), len(probe.CLASSES) + 1)
+        self.assertEqual(len(calls), len(probe.CLASSES) + 2)
         node = report["registry"]["AppleDisplay"]["nodes"][0]
         self.assertEqual(node["vendor-id"], "0x8086")
         self.assertEqual(node["device-id"], "0x46a3")
         self.assertTrue(node["edid_audio"]["advertises_audio"])
         self.assertEqual(report["audio_outputs"]["transport_counts"], {"HDMI": 1})
+        self.assertEqual(report["audio_extensions"], {
+            "status": "observed", "AppleALC": "loaded", "AppleGFXHDA": "loaded"})
+        self.assertEqual(report["registry"]["AppleHDAController"]["controller_name_roles"],
+                         {"HDEF": 1})
+        self.assertEqual(report["hda_gfx_association"]["status"], "shared-value-observed")
+        self.assertEqual(report["pci_audio_hda_gfx_association"]["status"],
+                         "shared-value-observed")
+        self.assertEqual(report["pci_audio_hda_gfx_association"]["audio_candidates"], 1)
+        self.assertEqual(report["pci_display_audio_hda_gfx_association"]["status"],
+                         "shared-value-observed")
+        self.assertEqual(report["pci_display_audio_hda_gfx_association"]["gpu_candidates"], 1)
+        self.assertEqual(report["pci_display_audio_hda_gfx_association"]["audio_candidates"], 1)
+        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_audio_class_candidates"], 1)
+        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_audio_class_0401_candidates"], 0)
+        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_audio_class_0403_candidates"], 1)
+        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_class_code_observations"], 3)
+        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_display_class_candidates"], 1)
+        self.assertEqual(report["registry"]["IOPCIDevice"]["pci_audio_class_status"], "observed")
+        self.assertEqual(report["registry"]["IOPCIDevice"]["nodes"], [])
         self.assertNotIn("private-", json.dumps(report))
+        self.assertNotIn("private-route-token", json.dumps(report))
+        self.assertNotIn("HDEF@", json.dumps(report))
+        report_json = json.dumps(report)
+        for private_key in ("_hda_gfx_values", "_hda_gfx_property_count",
+                            "_pci_audio_hda_gfx_values",
+                            "_pci_audio_hda_gfx_property_count",
+                            "_pci_display_hda_gfx_values",
+                            "_pci_display_hda_gfx_property_count"):
+            self.assertNotIn(private_key, report_json)
         self.assertNotIn("IODisplayEDID", json.dumps(report))
+
+    def test_hda_gfx_comparison_is_cautious_and_redacted(self):
+        for gpu, audio, expected in ((["shared-token"], ["shared-token"], "shared-value-observed"),
+                                     (["gpu-a"], ["audio-b"], "different-values-observed"),
+                                     (["gpu-a"], [], "incomplete"),
+                                     ([], [], "not-observed")):
+            result = probe.hda_gfx_association(
+                gpu, audio, {"gpu": "observed", "hda": "observed"})
+            self.assertEqual(result["status"], expected)
+            self.assertNotIn("shared-token", json.dumps(result))
+            self.assertNotIn("gpu-a", json.dumps(result))
+            self.assertNotIn("audio-b", json.dumps(result))
+        unavailable = probe.hda_gfx_association(
+            [], [], {"gpu": "observed", "hda": "invalid-response"})
+        self.assertEqual(unavailable["status"], "incomplete")
+
+    def test_binary_hda_gfx_values_compare_without_emitting_bytes(self):
+        secret = bytes((0x00, 0xff, 0x17))
+        token = probe.hda_gfx_value({"hda-gfx": secret})
+        self.assertEqual(token, secret)
+        shared = probe.hda_gfx_association(
+            [token], [secret], {"gpu": "observed", "audio": "observed"})
+        different = probe.hda_gfx_association(
+            [token], [bytes((0x00, 0xff, 0x18))],
+            {"gpu": "observed", "audio": "observed"})
+        self.assertEqual(shared["status"], "shared-value-observed")
+        self.assertEqual(different["status"], "different-values-observed")
+        self.assertNotIn("\\x00", repr(shared))
+        self.assertNotIn("\\xff", repr(different))
+
+    def test_audio_extension_states_and_controller_role_are_redacted(self):
+        self.assertEqual(probe.audio_extension_summary(
+            b"as.vit9696.AppleALC\ncom.apple.driver.AppleGFXHDA\n"), {
+                "status": "observed", "AppleALC": "loaded",
+                "AppleGFXHDA": "loaded"})
+        self.assertEqual(probe.audio_extension_summary(
+            b"com.apple.driver.AppleHDAController\n"), {
+                "status": "observed", "AppleALC": "not-listed",
+                "AppleGFXHDA": "not-listed"})
+        self.assertEqual(probe.audio_extension_summary(None), {"status": "unavailable"})
+        self.assertEqual(probe.audio_extension_summary(bytes((0xff,))),
+                         {"status": "invalid-response"})
+        self.assertEqual(probe.hda_controller_name_role(
+            {"IORegistryEntryName": "HDEF@1F,3"}), "HDEF")
+        self.assertEqual(probe.hda_controller_name_role(
+            {"IORegistryEntryName": "HDAS@1F,3"}), "HDAS")
+        self.assertEqual(probe.hda_controller_name_role(
+            {"IORegistryEntryName": "private-controller-name"}), "other")
+        self.assertEqual(probe.hda_controller_name_role({}), "unavailable")
+
+    def test_unreadable_hda_gfx_property_is_incomplete_not_absent(self):
+        gpu_registry = plistlib.dumps([{"hda-gfx": 1234}])
+        audio_registry = plistlib.dumps([])
+        audio = json.dumps({"SPAudioDataType": []})
+
+        def run(args, timeout=15):
+            if args[0] == "/usr/sbin/ioreg":
+                return {"AppleIntelFramebuffer": gpu_registry,
+                        "AppleHDAController": audio_registry,
+                        "AppleGFXHDA": audio_registry}.get(args[-1], plistlib.dumps([]))
+            return audio
+
+        report = probe.collect(run)
+        association = report["hda_gfx_association"]
+        self.assertEqual(association["status"], "incomplete")
+        self.assertEqual(association["gpu_candidates"], 1)
+        self.assertEqual(association["audio_candidates"], 0)
+        self.assertTrue(report["registry"]["AppleIntelFramebuffer"]["nodes"][0]["hda-gfx-present"])
+        self.assertNotIn("1234", json.dumps(report))
+
+    def test_pci_class_absence_is_reported_as_unavailable(self):
+        registry = plistlib.dumps([{"vendor-id": 0x8086, "device-id": 0x46a3}])
+        result = probe.registry_class(
+            "IOPCIDevice", lambda args, timeout=15: registry)
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["pci_class_code_observations"], 0)
+        self.assertEqual(result["pci_audio_class_candidates"], 0)
+        self.assertEqual(result["pci_audio_class_status"], "unavailable")
+        self.assertEqual(result["nodes"], [])
+
+    def test_pci_audio_candidates_keep_0401_and_0403_class_codes_distinct(self):
+        registry = plistlib.dumps([{"class-code": 0x04010000,
+                                    "vendor-id": 0x8086, "device-id": 0x51c8},
+                                   {"class-code": 0x04030000}])
+        result = probe.registry_class(
+            "IOPCIDevice", lambda args, timeout=15: registry)
+        self.assertEqual(result["pci_class_code_observations"], 2)
+        self.assertEqual(result["pci_audio_class_0401_candidates"], 1)
+        self.assertEqual(result["pci_audio_class_0403_candidates"], 1)
+        self.assertEqual(result["pci_audio_class_candidates"], 2)
+        self.assertEqual(result["pci_audio_class_devices"], [
+            {"class-code": "0x401", "vendor-id": "0x8086", "device-id": "0x51c8"},
+            {"class-code": "0x403"}])
+
+    def test_pci_hda_gfx_value_categories_are_redacted(self):
+        registry = plistlib.dumps([{"class-code": 0x03000000,
+                                    "hda-gfx": 1234},
+                                   {"class-code": 0x04010000,
+                                    "hda-gfx": bytes((0xff,))},
+                                   {"class-code": 0x06040000,
+                                    "hda-gfx": "private-unrelated-token"}])
+        result = probe.registry_class(
+            "IOPCIDevice", lambda args, timeout=15: registry)
+        self.assertEqual(result["pci_display_hda_gfx_value_categories"],
+                         {"other-type": 1})
+        self.assertEqual(result["pci_audio_hda_gfx_value_categories"],
+                         {"non-ascii-data": 1})
+        categories = {key: value for key, value in result.items()
+                      if key.endswith("hda_gfx_value_categories")}
+        self.assertNotIn("private-unrelated-token", json.dumps(categories))
+        self.assertNotIn("1234", json.dumps(categories))
+
+    def test_pci_binary_hda_gfx_match_is_reported_without_content(self):
+        secret = b"private-route\x00\xff"
+        registry = plistlib.dumps([{"class-code": 0x03000000,
+                                    "hda-gfx": secret},
+                                   {"class-code": 0x04010000,
+                                    "hda-gfx": secret}])
+
+        def run(args, timeout=15):
+            if args[0] == "/usr/sbin/ioreg" and args[-1] == "IOPCIDevice":
+                return registry
+            if args[0] == "/usr/sbin/system_profiler":
+                return json.dumps({"SPAudioDataType": []}).encode()
+            return plistlib.dumps([])
+
+        report = probe.collect(run)
+        association = report["pci_display_audio_hda_gfx_association"]
+        self.assertEqual(association["status"], "shared-value-observed")
+        self.assertEqual(report["registry"]["IOPCIDevice"][
+            "pci_display_hda_gfx_value_categories"], {"non-ascii-data": 1})
+        self.assertEqual(report["registry"]["IOPCIDevice"][
+            "pci_audio_hda_gfx_value_categories"], {"non-ascii-data": 1})
+        self.assertNotIn("private-route", json.dumps(report))
 
     def test_unavailable_is_not_zero(self):
         report = probe.collect(lambda args, timeout=15: None)
@@ -105,8 +365,23 @@ class ProbeTests(unittest.TestCase):
 
     def test_invalid_command_responses(self):
         report = probe.collect(lambda args, timeout=15: b"not a plist or JSON")
-        self.assertEqual(report["registry"]["AppleDisplay"], {"status": "invalid-response"})
+        self.assertEqual(report["registry"]["AppleDisplay"],
+                         {"status": "invalid-response", "reason": "malformed-plist"})
         self.assertEqual(report["audio_outputs"], {"status": "invalid-response"})
+
+    def test_empty_registry_response_is_not_called_malformed(self):
+        result = probe.registry_class(
+            "AppleGFXHDA", lambda args, timeout=15: b"")
+        self.assertEqual(result, {"status": "invalid-response", "reason": "empty-response"})
+
+    def test_registry_invalid_shapes_have_redacted_reasons(self):
+        cases = ((plistlib.dumps({"private": "value"}), "unexpected-root-type"),
+                 (plistlib.dumps(["private-value"]), "unexpected-node-type"))
+        for raw, reason in cases:
+            result = probe.registry_class(
+                "AppleGFXHDA", lambda args, timeout=15: raw)
+            self.assertEqual(result, {"status": "invalid-response", "reason": reason})
+            self.assertNotIn("private", json.dumps(result))
 
 
 class EldTests(unittest.TestCase):
