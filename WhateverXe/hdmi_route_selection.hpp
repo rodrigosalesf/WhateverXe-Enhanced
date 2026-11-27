@@ -57,4 +57,28 @@ inline bool select(const Codec *codecs, size_t count, unsigned controller,
     out = {chosen->address, pin, candidate};
     return true;
 }
+
+// Adapted from the codec query approach in jkbuha/WhateverXe-contrib 94b8fb6.
+// Reader is bound to one verified controller and codec address by its owner.
+// No kernel hook or hardware command transport is installed by this helper.
+struct PcmCaps { unsigned ratesAndDepths, formats; };
+template<class Reader>
+bool readSelectedPcm(Reader &reader, const Route &route, PcmCaps &out) {
+    if (route.address > 14 || !route.pin || route.pin > 127 ||
+        !route.converter || route.converter > 127 || route.pin == route.converter)
+        return false;
+    unsigned caps = 0, pcm = 0, formats = 0;
+    if (!reader.get(route.address, route.converter, 0xF00, 0x09, caps) ||
+        caps == 0xFFFFFFFFU || ((caps >> 20) & 15U) != 0 ||
+        !(caps & (1U << 9)) || !(caps & (1U << 4))) return false;
+    // Only explicit widget format overrides are accepted; inherited AFG
+    // capabilities need separate verified function-group evidence.
+    if (!reader.get(route.address, route.converter, 0xF00, 0x0A, pcm) ||
+        !reader.get(route.address, route.converter, 0xF00, 0x0B, formats) ||
+        pcm == 0xFFFFFFFFU || formats == 0xFFFFFFFFU ||
+        !(formats & 1U) || !(pcm & 0xFFFU) || !(pcm & 0x1F0000U))
+        return false;
+    out = {pcm, formats};
+    return true;
+}
 }
