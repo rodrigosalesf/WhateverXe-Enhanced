@@ -190,6 +190,27 @@ int main() {
     edid[133] = 0x11; // non-LPCM descriptor, despite Basic Audio
     checksum(edid + 128);
     assert(!buildEld(edid, 256).length);
+    // Basic Audio without an audio data block: baseline stereo only.
+    fixture(edid);
+    memmove(edid + 132, edid + 136, 6);
+    memset(edid + 138, 0, 4);
+    edid[130] = 10;
+    checksum(edid + 128);
+    const auto basic = buildEld(edid, 256);
+    assert(basic.length == sizeof(expected));
+    assert(memcmp(basic.bytes, expected, sizeof(expected)) == 0);
+    assert(supportsStereoPcm(basic, 32000, 16));
+    assert(supportsStereoPcm(basic, 44100, 16));
+    assert(supportsStereoPcm(basic, 48000, 16));
+    assert(!supportsStereoPcm(basic, 96000, 16));
+    assert(!supportsStereoPcm(basic, 48000, 24));
+    edid[131] = 0;
+    checksum(edid + 128);
+    assert(!buildEld(edid, 256).length);
+    edid[131] = 0x40;
+    edid[133] = 4; // No HDMI OUI.
+    checksum(edid + 128);
+    assert(!buildEld(edid, 256).length);
     // Reserved bits or empty rate/depth fields in LPCM are invalid.
     const uint8_t invalidLpcm[][3] {
         {0x89, 7, 1}, {9, 0x87, 1}, {9, 7, 0x81},
