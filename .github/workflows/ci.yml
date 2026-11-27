@@ -178,6 +178,7 @@ jobs:
           xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror tests/hdmi_wake_transaction.cpp -o build/quality-bin/hdmi-wake-transaction
           build/quality-bin/hdmi-wake-transaction
           bash -n tools/collect-hdmi-state.sh
+          bash -n tools/validate-e53.sh
       - name: CPU tests
         run: >-
           python3 tools/test.py
@@ -189,6 +190,8 @@ jobs:
           --require gpu_frequency_probe
           --require gpu_rc6_probe
           --require display_power_probe
+          --require display13_power_dispatch
+          --require display13_wake_notifications
           --require display13_shared_restore
           --require frame_pacing_probe
           --require gpu_memory_probe
@@ -234,6 +237,24 @@ jobs:
           python3 tools/package.py --build build/RELEASE --configuration RELEASE --tag "$RELEASE_TAG"
           cd build/dist
           shasum -a 256 *.zip > SHA256SUMS
+      - name: Package E5.3 validation kit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/e53/tools
+          cp build/diagnostics/metal_probe tools/validate-e53.sh build/e53/tools/
+          cp docs/E5.3-validation.md build/e53/
+          git rev-parse HEAD > build/e53/commit.txt
+          for archive in build/dist/WhateverXe-*.zip; do
+            unzip -p "$archive" WhateverXe.kext/Contents/MacOS/WhateverXe | shasum -a 256 |
+              awk -v name="$(basename "$archive")" '{print $1, name}' >> build/e53/kext-sha256.txt
+          done
+          (cd build/e53 && zip -qr ../e53-validation.zip .)
+      - uses: actions/upload-artifact@v6
+        with:
+          name: E5.3-validation
+          path: build/e53-validation.zip
+          if-no-files-found: error
       - name: Upload packages
         uses: actions/upload-artifact@v6
         with:

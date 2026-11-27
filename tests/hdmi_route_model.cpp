@@ -22,7 +22,7 @@ struct PinReader {
     }
 };
 struct DiscoveryReader {
-    unsigned vendor {0x8086281C}, converterCaps {0x200};
+    unsigned vendor {0x8086281C}, converterCaps {0x200}, pinCaps {0x90};
     bool get(unsigned address, unsigned nid, unsigned verb, unsigned param, unsigned &out) {
         if (address != 2) return false;
         if (verb == 0xF02 && nid == 8) { out = 0x0503; return true; }
@@ -33,6 +33,7 @@ struct DiscoveryReader {
         else if (nid == 1 && param == 5) out = 1;
         else if (nid == 1 && param == 4) out = 0x30006;
         else if (nid == 8 && param == 9) out = 0x400300;
+        else if (nid == 8 && param == 12) out = pinCaps;
         else if (nid == 8 && param == 14) out = 2;
         else if (nid == 5 && param == 9) out = converterCaps;
         else if ((nid == 1 || nid == 5) && param == 10) out = 0x1A07F0;
@@ -47,6 +48,14 @@ int main() {
     PcmCaps inherited {};
     assert(discover(discovery,2,0x8086281C,8,found,inherited));
     assert(found.converter == 5 && inherited.ratesAndDepths == 0x1A07F0);
+    discovery.pinCaps = 0x1000010;
+    assert(discover(discovery,2,0x8086281C,8,found,inherited));
+    const unsigned invalidPins[] {0x10,0x80,0xFFFFFFFFU};
+    for (unsigned caps : invalidPins) {
+        discovery.pinCaps = caps;
+        assert(!discover(discovery,2,0x8086281C,8,found,inherited));
+    }
+    discovery.pinCaps = 0x90;
     discovery.converterCaps = 0x210;
     assert(discover(discovery,2,0x8086281C,8,found,inherited));
     discovery.converterCaps = 0;

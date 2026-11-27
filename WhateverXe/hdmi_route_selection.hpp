@@ -174,6 +174,12 @@ bool discover(Reader &reader, unsigned address, unsigned vendor, unsigned pin,
         }
     }
     if (!afg) return false;
+    // HDA parameter 0x0C, bit definitions from Linux sound/hda_verbs.h.
+    // Digital widgets can also be S/PDIF. Require a display output pin.
+    constexpr unsigned output = 1U << 4, hdmi = 1U << 7, dp = 1U << 24;
+    unsigned pinCaps = 0;
+    if (!reader.get(address,pin,0xF00,0x0C,pinCaps) || pinCaps == 0xFFFFFFFFU ||
+        !(pinCaps & output) || !(pinCaps & (hdmi | dp))) return false;
     unsigned nodes[127] {};
     size_t used = 0, selected = 0;
     if (!readPinConnections(reader,address,pin,nodes,used,selected)) return false;
