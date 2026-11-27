@@ -81,4 +81,44 @@ bool readSelectedPcm(Reader &reader, const Route &route, PcmCaps &out) {
     out = {pcm, formats};
     return true;
 }
+
+// Read a pin's actual connection list, including HDA range encoding.
+// The reader must remain bound to the same codec for the entire query.
+template<class Reader>
+bool readPinConnections(Reader &reader, unsigned address, unsigned pin,
+                        unsigned (&nodes)[127], size_t &count, size_t &selected) {
+    if (address > 14 || !pin || pin > 127) return false;
+    unsigned length = 0, caps = 0, selection = 0;
+    if (!reader.get(address,pin,0xF00,9,caps) || caps == 0xFFFFFFFFU ||
+        ((caps >> 20) & 15U) != 4 || !(caps & 0x200U) || !(caps & 0x100U) ||
+        !reader.get(address,pin,0xF00,0x0E,length) || length > 255 ||
+        !(length & 127U)) return false;
+    const unsigned width = (length & 128U) ? 16U : 8U;
+    const unsigned per = 32U / width, entries = length & 127U;
+    const unsigned range = 1U << (width - 1U);
+    unsigned scratch[127] {}, previous = 0, used = 0, word = 0;
+    for (unsigned i = 0; i < entries; ++i) {
+        if (i % per == 0 && (!reader.get(address,pin,0xF02,i,word) ||
+                             word == 0xFFFFFFFFU)) return false;
+        const unsigned entry = (word >> ((i % per)*width)) & (range*2U-1U);
+        const unsigned nid = entry & (range-1U);
+        if (!nid || nid > 127) return false;
+        unsigned first = nid;
+        if (entry & range) {
+            if (!previous || nid <= previous) return false;
+            first = previous + 1;
+        }
+        for (unsigned n = first; n <= nid; ++n) {
+            if (used == 127 || n == pin) return false;
+            scratch[used++] = n;
+        }
+        previous = nid;
+    }
+    if (used > 1 && (!reader.get(address,pin,0xF01,0,selection) ||
+                     selection >= used)) return false;
+    for (unsigned i = 0; i < used; ++i) nodes[i] = scratch[i];
+    count = used;
+    selected = selection;
+    return true;
+}
 }
