@@ -1,4 +1,5 @@
 #include "kern_hdmi_audio_payload.hpp"
+#include "kern_hdmi_dip_transaction.hpp"
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -30,7 +31,137 @@ static void fixture(uint8_t *edid) {
     checksum(edid + 128);
 }
 
+// Fake synchronous backend. Errors may occur AFTER mutation; ownership loss
+// blocks all later operations. This is not an AppleHDA or MMIO emulator.
+struct FakeDip {
+    DipState value {};
+    unsigned calls {};
+    unsigned failAt {};
+    unsigned failAgainAt {};
+    unsigned loseAt {};
+    unsigned corruptAt {};
+    unsigned ignoreModeAt {};
+    unsigned ignoreModeAgainAt {};
+    unsigned writes {};
+    bool owner {true};
+
+    bool owns() const { return owner; }
+    bool finish() {
+        ++calls;
+        if (calls == loseAt)
+            owner = false;
+        return calls != failAt && calls != failAgainAt;
+    }
+    bool read(DipState &state) {
+        assert(owner);
+        state = value;
+        const bool ok = finish();
+        if (calls == corruptAt)
+            state.image.bytes[0] ^= 1;
+        return ok;
+    }
+    bool setTransmit(DipTransmit mode) {
+        assert(owner);
+        if (calls + 1 != ignoreModeAt && calls + 1 != ignoreModeAgainAt)
+            value.transmit = mode;
+        return finish();
+    }
+    bool write(const DipImage &image) {
+        assert(owner && value.transmit == DipTransmit::disabled);
+        ++writes;
+        value.image = image;
+        return finish();
+    }
+};
+
+static void testDipTransactions() {
+    using Result = DipTransactionResult;
+    const auto desired = buildStereoDipImage(stereoInfoFrame(2), DipLayout::fullHdmi14, 32);
+    FakeDip initial {};
+    initial.value.image.length = 32;
+    initial.value.image.bytes[0] = 0xaa;
+    initial.value.image.bytes[31] = 0x55;
+    initial.value.transmit = DipTransmit::bestEffort;
+
+    auto fake = initial;
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::applied);
+    assert(fake.calls == 7 && sameDipImage(fake.value.image, desired));
+    assert(fake.value.transmit == DipTransmit::bestEffort);
+    fake.calls = 0;
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::unchanged);
+    assert(fake.calls == 1);
+
+    fake = initial;
+    fake.failAt = 1;
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rejected);
+    assert(fake.calls == 1 && sameDipImage(fake.value.image, initial.value.image));
+    for (unsigned failure = 2; failure <= 7; ++failure) {
+        fake = initial;
+        fake.failAt = failure;
+        assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rolledBack);
+        assert(sameDipImage(fake.value.image, initial.value.image));
+        assert(fake.value.transmit == initial.value.transmit);
+    }
+    fake = initial;
+    fake.value.transmit = DipTransmit::disabled;
+    fake.failAt = 6;
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rolledBack);
+    assert(fake.value.transmit == DipTransmit::disabled);
+
+    fake = initial;
+    fake.corruptAt = 5;
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rolledBack);
+    assert(sameDipImage(fake.value.image, initial.value.image));
+    fake = initial;
+    fake.failAt = 4;
+    fake.failAgainAt = 7;
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rollbackFailed);
+    assert(fake.value.transmit == DipTransmit::disabled);
+
+    for (unsigned loss = 1; loss <= 7; ++loss) {
+        fake = initial;
+        fake.loseAt = loss;
+        assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::ownershipLost);
+        assert(fake.calls == loss);
+    }
+    fake = initial;
+    fake.failAt = 4;
+    fake.loseAt = 6; // Ownership changes during rollback readback.
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::ownershipLost);
+    assert(fake.calls == 6);
+
+    // Acknowledged-but-ignored stop must never permit a packet write.
+    fake = initial;
+    fake.ignoreModeAt = 2;
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rolledBack);
+    assert(fake.writes == 1 && sameDipImage(fake.value.image, initial.value.image));
+    fake = initial;
+    fake.ignoreModeAt = 2;
+    fake.ignoreModeAgainAt = 4;
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rollbackFailed);
+    assert(fake.writes == 0);
+    assert(fake.value.transmit == DipTransmit::disabled);
+
+    fake = initial;
+    fake.value.transmit = DipTransmit::once;
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rejected);
+    assert(fake.calls == 1);
+    fake = initial;
+    fake.value.image.length = 16;
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::rejected);
+    assert(fake.calls == 1);
+    fake = initial;
+    auto invalid = desired;
+    invalid.bytes[31] = 1;
+    assert(applyDipTransaction(fake, invalid, DipLayout::fullHdmi14) == Result::rejected);
+    assert(fake.calls == 0);
+    fake.owner = false;
+    assert(applyDipTransaction(fake, desired, DipLayout::fullHdmi14) == Result::ownershipLost);
+    assert(fake.calls == 0);
+}
+
 int main() {
+    testDipTransactions();
     uint8_t edid[384] {};
     fixture(edid);
     const auto e = buildEld(edid, 256);
