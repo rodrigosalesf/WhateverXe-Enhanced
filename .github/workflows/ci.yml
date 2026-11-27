@@ -20,7 +20,7 @@ jobs:
     runs-on: macos-15-intel
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Audit pinned Sequoia framebuffer and available host AppleHDA binaries
@@ -87,7 +87,7 @@ jobs:
           print(path.read_text())
           PY
       - name: Upload ABI reference results (JSON only)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: HDMI-reference-ABI
           path: build/hdmi-reference-abi/*.json
@@ -98,16 +98,16 @@ jobs:
     runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: acidanthera/MacKernelSDK
           ref: 05094e5e88cec7caedbfb35e8449ed0db94bf95b
           path: MacKernelSDK
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: acidanthera/Lilu
           ref: 1.7.2
@@ -225,14 +225,14 @@ jobs:
           cd build/dist
           shasum -a 256 *.zip > SHA256SUMS
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Artifacts
           path: build/dist/*
           if-no-files-found: error
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Test-results
           path: |
@@ -250,10 +250,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: Artifacts
           path: dist
