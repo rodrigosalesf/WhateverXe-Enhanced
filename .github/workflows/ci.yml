@@ -143,6 +143,8 @@ jobs:
           python3 tools/hdmi_route_model.py -v
           xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror tests/hdmi_route_model.cpp -o build/quality-bin/hdmi-route-model
           build/quality-bin/hdmi-route-model
+          xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror tests/hdmi_wake_plan.cpp -o build/quality-bin/hdmi-wake-plan
+          build/quality-bin/hdmi-wake-plan
           bash -n tools/collect-hdmi-state.sh
       - name: CPU tests
         run: >-
