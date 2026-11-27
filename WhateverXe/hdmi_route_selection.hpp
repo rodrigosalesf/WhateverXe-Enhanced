@@ -82,6 +82,34 @@ bool readSelectedPcm(Reader &reader, const Route &route, PcmCaps &out) {
     return true;
 }
 
+// Resolve inherited PCM only from an audio function group whose subordinate
+// range contains the selected converter. Reader remains codec-bound.
+template<class Reader>
+bool readInheritedPcm(Reader &reader, const Route &route, unsigned afg, PcmCaps &out) {
+    if (route.address > 14 || !afg || afg > 127 ||
+        !route.converter || route.converter > 127 || route.converter == afg)
+        return false;
+    unsigned type = 0, children = 0, caps = 0, pcm = 0, formats = 0;
+    if (!reader.get(route.address,afg,0xF00,5,type) ||
+        type == 0xFFFFFFFFU || (type & 255U) != 1 ||
+        !reader.get(route.address,afg,0xF00,4,children) ||
+        children == 0xFFFFFFFFU) return false;
+    const unsigned start = (children >> 16) & 255U, count = children & 255U;
+    if (!start || start > 127 || !count || count > 128U-start ||
+        route.converter < start || route.converter-start >= count) return false;
+    if (!reader.get(route.address,route.converter,0xF00,9,caps) ||
+        caps == 0xFFFFFFFFU || ((caps >> 20) & 15U) != 0 ||
+        !(caps & 0x200U)) return false;
+    if (caps & 16U) return readSelectedPcm(reader,route,out);
+    if (!reader.get(route.address,afg,0xF00,10,pcm) ||
+        !reader.get(route.address,afg,0xF00,11,formats) ||
+        pcm == 0xFFFFFFFFU || formats == 0xFFFFFFFFU ||
+        !(formats & 1U) || !(pcm & 0xFFFU) || !(pcm & 0x1F0000U)) return false;
+    out = {pcm,formats};
+    return true;
+}
+
+
 // Read a pin's actual connection list, including HDA range encoding.
 // The reader must remain bound to the same codec for the entire query.
 template<class Reader>
