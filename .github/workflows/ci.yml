@@ -20,7 +20,7 @@ jobs:
     runs-on: macos-15-intel
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Audit pinned Sequoia framebuffer and available host AppleHDA binaries
@@ -34,6 +34,34 @@ jobs:
           curl --fail --location --silent --show-error --retry 2 --connect-timeout 15 --max-time 120 --output "$donor" \
             'https://raw.githubusercontent.com/b00t0x/WhateverXe-Graphics/a558c561e06b2f78d675d16dd8f4303bf1c33fad/payloads/Sequoia/Library/Extensions/AppleIntelTGLGraphicsFramebuffer.kext/Contents/MacOS/AppleIntelTGLGraphicsFramebuffer'
           test "$(git hash-object "$donor")" = '74baffa1f0ba577ae1c22345fd6011c1ca2d3863'
+          # Inventory candidate names only, never qualify ABI from names.
+          xcrun nm -j "$donor" > "$tmp/framebuffer-symbols.txt"
+          python3 - "$tmp/framebuffer-symbols.txt" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          names = Path(sys.argv[1]).read_text().splitlines()
+          candidates = ("hwSetPowerWellStatePG", "restorePowerWellsState",
+                        "hwEnableAudio", "hwDisableAudio", "setAudioProperties",
+                        "IsDisplayAudioSupported")
+          # Inventory DC/DMC entry points without assuming their signatures.
+          dc_names = sorted({name for name in names
+                             if any(token in name.lower() for token in
+                                    ("dcstate", "dc_state", "dc5", "dc6", "dmc",
+                                     "displaycstate", "displayc_state", "powerwell"))})
+          Path("build/hdmi-reference-abi/dc-symbols.json").write_text(
+              json.dumps({"kernel_activation_authorized": False,
+                          "qualification": "name inventory only",
+                          "symbols": dc_names}, indent=2) + "\n")
+          print("DC/DMC candidates:", json.dumps(dc_names))
+          report = {"kernel_activation_authorized": False,
+                    "qualification": "name inventory only",
+                    "candidates": {key: sorted({name for name in names if key in name})
+                                   for key in candidates}}
+          Path("build/hdmi-reference-abi/power-symbols.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n")
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
           hda='/System/Library/Extensions/AppleHDA.kext/Contents'
           rc=0
           python3 tools/hdmi_audio_abi.py \
@@ -69,10 +97,10 @@ jobs:
           print(path.read_text())
           PY
       - name: Upload ABI reference results (JSON only)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: HDMI-reference-ABI
-          path: build/hdmi-reference-abi/reference.json
+          path: build/hdmi-reference-abi/*.json
           if-no-files-found: error
 
   build:
@@ -80,16 +108,16 @@ jobs:
     runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: acidanthera/MacKernelSDK
           ref: 05094e5e88cec7caedbfb35e8449ed0db94bf95b
           path: MacKernelSDK
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: acidanthera/Lilu
           ref: 1.7.2
@@ -131,6 +159,26 @@ jobs:
           xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -fsyntax-only tests/xelp_flight_recorder.cpp
           "$tidy" tests/hdmi_audio_payload.cpp -- -std=c++17 -IWhateverXe -isysroot "$sdk"
           xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -IWhateverXe -fsyntax-only tests/hdmi_audio_payload.cpp
+      - name: HDMI EDID offline tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          build/quality-venv/bin/ruff check tools/hdmi_edid_probe.py
+          python3 tools/hdmi_edid_probe.py -v
+          build/quality-venv/bin/ruff check tools/hdmi_abi_readiness.py
+          python3 tools/hdmi_abi_readiness.py -v
+          build/quality-venv/bin/ruff check tools/hdmi_route_model.py
+          python3 tools/hdmi_route_model.py -v
+          xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror tests/hdmi_route_model.cpp -o build/quality-bin/hdmi-route-model
+          build/quality-bin/hdmi-route-model
+          xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror tests/hdmi_wake_plan.cpp -o build/quality-bin/hdmi-wake-plan
+          build/quality-bin/hdmi-wake-plan
+          xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror tests/hdmi_mmio_guard.cpp -o build/quality-bin/hdmi-mmio-guard
+          build/quality-bin/hdmi-mmio-guard
+          xcrun clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror tests/hdmi_wake_transaction.cpp -o build/quality-bin/hdmi-wake-transaction
+          build/quality-bin/hdmi-wake-transaction
+          bash -n tools/collect-hdmi-state.sh
+          bash -n tools/validate-e53.sh
       - name: CPU tests
         run: >-
           python3 tools/test.py
@@ -142,6 +190,8 @@ jobs:
           --require gpu_frequency_probe
           --require gpu_rc6_probe
           --require display_power_probe
+          --require display13_power_dispatch
+          --require display13_wake_notifications
           --require display13_shared_restore
           --require frame_pacing_probe
           --require gpu_memory_probe
@@ -187,15 +237,57 @@ jobs:
           python3 tools/package.py --build build/RELEASE --configuration RELEASE --tag "$RELEASE_TAG"
           cd build/dist
           shasum -a 256 *.zip > SHA256SUMS
+      - name: Package E5.3 validation kit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/e53/tools
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror tools/hdmi_codec_reader.cpp \
+            -framework IOKit -framework CoreFoundation -o build/e53/tools/hdmi_codec_reader
+          cp build/diagnostics/metal_probe tools/validate-e53.sh build/e53/tools/
+          cp docs/E5.3-validation.md build/e53/
+          git rev-parse HEAD > build/e53/commit.txt
+          for archive in build/dist/WhateverXe-*.zip; do
+            unzip -p "$archive" WhateverXe.kext/Contents/MacOS/WhateverXe | shasum -a 256 |
+              awk -v name="$(basename "$archive")" '{print $1, name}' >> build/e53/kext-sha256.txt
+          done
+          (cd build/e53 && zip -qr ../e53-validation.zip .)
+      - uses: actions/upload-artifact@v6
+        with:
+          name: E5.3-validation
+          path: build/e53-validation.zip
+          if-no-files-found: error
+      - name: Package hardware test RC
+        shell: bash
+        run: |
+          set -euo pipefail
+          rc=build/rc-e53
+          mkdir -p "$rc"
+          cp -R build/e53/. "$rc/"
+          cp docs/E5.3-teste-acer.txt "$rc/TESTE-NO-ACER.txt"
+          archives=(build/dist/WhateverXe-*-RELEASE.zip)
+          test "${#archives[@]}" -eq 1
+          unzip -q "${archives[0]}" 'WhateverXe.kext/*' -d "$rc"
+          expected=$(awk -v archive="$(basename "${archives[0]}")" '$2 == archive {print $1}' "$rc/kext-sha256.txt")
+          actual=$(shasum -a 256 "$rc/WhateverXe.kext/Contents/MacOS/WhateverXe" | cut -d' ' -f1)
+          test "$actual" = "$expected"
+          (cd "$rc" && find . -type f ! -name SHA256SUMS -exec shasum -a 256 {} + > SHA256SUMS &&
+            shasum -a 256 -c SHA256SUMS && zip -qr ../WhateverXe-Enhanced-E5.3-RC.zip .)
+      - name: Upload hardware test RC
+        uses: actions/upload-artifact@v6
+        with:
+          name: WhateverXe-Enhanced-E5.3-RC
+          path: build/WhateverXe-Enhanced-E5.3-RC.zip
+          if-no-files-found: error
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Artifacts
           path: build/dist/*
           if-no-files-found: error
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Test-results
           path: |
@@ -213,10 +305,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: Artifacts
           path: dist

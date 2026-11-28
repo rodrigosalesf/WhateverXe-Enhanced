@@ -454,7 +454,7 @@ private:
     static void stopDisplay13Engine(void *power,bool systemSuspend);
     static bool enableDisplay13EngineLocked(void *power);
     static bool restoreDisplay13ResourcesLocked(void *power,bool waking);
-    static bool restoreDisplay13Ports(IOService *controller,unsigned onlyDDI=UINT32_MAX);
+    static bool restoreDisplay13Ports(IOService *controller,uint32_t epoch,unsigned onlyDDI=UINT32_MAX);
     static bool prepareDisplay13Wake(IOService *fb);
 	static void wrapAlderLakeNPowerOverride(void *power,bool enable);
 	static void wrapAlderLakeNPowerRestore(void *power,bool waking);

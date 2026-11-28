@@ -10868,12 +10868,20 @@ bool XE::restoreDisplay13ResourcesLocked(void *power,bool waking) {
     return ready;
 }
 
-bool XE::restoreDisplay13Ports(IOService *controller,unsigned onlyDDI) {
+bool XE::restoreDisplay13Ports(IOService *controller,uint32_t epoch,unsigned onlyDDI) {
     auto &c=display13FBPower;bool ready=true;uint32_t ports[10]={1};
-    for(unsigned tc=0;c.lock && tc<4;++tc) {
+    if(!c.lock || !controller || (onlyDDI!=UINT32_MAX && (onlyDDI<3 || onlyDDI>=7)))return false;
+    IOLockLock(c.lock);
+    const bool admitted=c.restoreEpoch==epoch && c.controller==controller && !c.restorePending && !c.bridge.state.suspended;
+    IOLockUnlock(c.lock);
+    if(!admitted)return false;
+    for(unsigned tc=0;tc<4;++tc) {
         if(onlyDDI!=UINT32_MAX && tc+3!=onlyDDI)continue;
         IOLockLock(c.lock);
-        const bool pending=c.controller==controller && c.tcMode[tc].restorePending;
+        if(c.controller!=controller || c.restoreEpoch!=epoch || c.restorePending || c.bridge.state.suspended) {
+            IOLockUnlock(c.lock);ready=false;break;
+        }
+        const bool pending=c.tcMode[tc].restorePending;
         auto port=pending ? c.tcObject[tc] : nullptr;
         const auto mode=c.tcMode[tc].selectedMode;
         if(port)port->retain();
@@ -10881,10 +10889,19 @@ bool XE::restoreDisplay13Ports(IOService *controller,unsigned onlyDDI) {
         if(pending && !port)ready=false;
         if(port) {
             ports[1+2*tc]=mode;ports[2+2*tc]=wrapDisplay13TCMode(port,mode);
-            if(ports[2+2*tc]!=kIOReturnSuccess)ready=false;
+            IOLockLock(c.lock);
+            const bool restored=c.controller==controller && c.restoreEpoch==epoch &&
+                !c.restorePending && !c.bridge.state.suspended &&
+                c.tcObject[tc]==port && !c.tcMode[tc].restorePending;
+            IOLockUnlock(c.lock);
+            if(ports[2+2*tc]!=kIOReturnSuccess || !restored)ready=false;
             port->release();
         }
     }
+    IOLockLock(c.lock);
+    ready=ready && c.controller==controller && c.restoreEpoch==epoch &&
+        !c.restorePending && !c.bridge.state.suspended;
+    IOLockUnlock(c.lock);
     ports[9]=ready;IORegistryEntry::getRegistryRoot()->setProperty("WEXDisplay13ResumePorts",ports,sizeof(ports));
     return ready;
 }
@@ -10912,17 +10929,19 @@ bool XE::prepareDisplay13Wake(IOService *fb) {
             connected=sde==UINT32_MAX || north==UINT32_MAX || port.legacyHPD(sde) || port.altHPD(sde,north);
         }
     }
+    const auto epoch=c.restoreEpoch;
     IOLockUnlock(c.lock);
     // A disconnected peer must reach native probing/teardown, not prevent
     // every other FB from waking. Only this output's live TC link is required.
-    return ready && (!connected || restoreDisplay13Ports(controller,ddi));
+    return ready && (!connected || restoreDisplay13Ports(controller,epoch,ddi));
 }
 
 void XE::wrapAlderLakeNPowerRestore(void *power,bool waking) {
     auto &c=display13FBPower;if(!c.lock || power!=c.power || !c.controller)return;
     IOLockLock(c.lock);const bool ready=restoreDisplay13ResourcesLocked(power,waking);
-    auto controller=static_cast<IOService *>(c.controller);IOLockUnlock(c.lock);
-    if(ready)restoreDisplay13Ports(controller);
+    auto controller=static_cast<IOService *>(c.controller);
+    const auto epoch=c.restoreEpoch;IOLockUnlock(c.lock);
+    if(ready)restoreDisplay13Ports(controller,epoch);
 }
 
 void XE::wrapAlderLakeNPrimaryDBUF(OSObject *plane,uint32_t start,uint32_t end,bool wait) {

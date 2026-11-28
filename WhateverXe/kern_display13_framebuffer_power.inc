@@ -122,6 +122,7 @@ bool XE::ownedDisplay13Framebuffer(IOService *fb) const {
     return fb && display13FBLifecycleHooksReady && display13FBABIReady && display13PagingLayoutKnown &&
         !strcmp(fb->getMetaClass()->getClassName(),"AppleIntelFramebuffer") &&
         fb->getMetaClass()->getClassSize()>=0x4B90 && adlnTopologyController &&
+        adlnTopologyController->getMetaClass()->getClassSize()>=0x1C20 &&
         Display13FBMemory::field<IOService *>(fb,0x1D0)==adlnTopologyController &&
         Display13FBMemory::field<uint32_t>(fb,0x1DC)<3 &&
         Display13FBMemory::field<IOService *>(adlnTopologyController,0xD60+8*Display13FBMemory::field<uint32_t>(fb,0x1DC))==fb;
@@ -148,7 +149,11 @@ bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
     // not a scanout-success report and must not depend on an unplugged peer
     // acquiring a link. Keep unsuccessful TC restoration pending/observable;
     // prepareDisplay13Wake requires it for that output if HPD is present.
-    const bool portsReady=restoreDisplay13Ports(controller);
+    const bool portsReady=restoreDisplay13Ports(controller,epoch);
+    IOLockLock(c.lock);
+    const bool currentEpoch=c.restoreEpoch==epoch;
+    IOLockUnlock(c.lock);
+    if(!currentEpoch)return false;
     if(displayWakeEventEpoch!=epoch) {
         displayWakeEventEpoch=epoch;displayWakeEventErrors=0;
         for(auto &phase:displayWakeEventPhase)phase=0;
@@ -158,6 +163,7 @@ bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
     uint32_t events[18]={4,display13PagingLayoutKnown};bool complete=true;
     for(unsigned index=0;index<3;++index) {
         IOLockLock(c.lock);
+        if(c.restoreEpoch!=epoch){IOLockUnlock(c.lock);complete=false;break;}
         auto fb=Display13FBMemory::field<IOService *>(controller,0xD60+8*index);
         if(fb)fb->retain();
         IOLockUnlock(c.lock);
@@ -165,6 +171,14 @@ bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
         if(fb->getMetaClass()->getClassSize()<0x4B90 ||
            Display13FBMemory::field<IOService *>(fb,0x1D0)!=controller ||
            Display13FBMemory::field<uint32_t>(fb,0x1DC)!=index){complete=false;fb->release();continue;}
+        // Either notification can reenter the power manager or replace a slot.
+        auto stillOwned = [&]() {
+            IOLockLock(c.lock);
+            const bool current = c.restoreEpoch == epoch &&
+                Display13FBMemory::field<IOService *>(controller,0xD60+8*index) == fb;
+            IOLockUnlock(c.lock);
+            return current;
+        };
         auto &phase=displayWakeEventPhase[index];
         const bool pending=display13PagingLayoutKnown && !(Display13FBMemory::field<uint8_t>(fb,0x199)&0x20);
         // Native peers already notified themselves if paging is active. The
@@ -184,6 +198,11 @@ bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
             events[2]|=1U<<index;
             if(!phase) {
                 events[4+2*index]=event(fb,4,reinterpret_cast<void *>(1));
+                if (!stillOwned()) {
+                    fb->release();
+                    complete = false;
+                    break;
+                }
                 // handleEvent returns Success without delivery on the wrong
                 // power thread. Conversely a subscriber error can follow a
                 // delivered DidWake: never replay that scope-decrement event.
@@ -197,6 +216,11 @@ bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
                 // peer has no future transition; DSI also owns its own pair.
                 const bool nativeOn=!internal && (nativePower==1 || (fb==caller && nativePowerOn));
                 events[5+2*index]=nativeOn ? kIOReturnSuccess : event(fb,8,nullptr);
+                if (!nativeOn && !stillOwned()) {
+                    fb->release();
+                    complete = false;
+                    break;
+                }
                 phase=2;
                 if(internal && events[5+2*index]==kIOReturnSuccess && dsiPowerOffNotified) {
                     dsiPowerOffNotified=false;++dsiPowerOnEvents;

@@ -6,6 +6,7 @@
 #ifndef KERN_HDMI_AUDIO_PAYLOAD_HPP
 #define KERN_HDMI_AUDIO_PAYLOAD_HPP
 
+#include "hdmi_route_selection.hpp"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -22,9 +23,9 @@ inline bool checksumValid(const uint8_t *block) {
     return (sum & 0xffU) == 0;
 }
 
-// Require a complete EDID and an explicit HDMI VSDB plus a usable LPCM SAD.
-// Never publish a partial ELD if a later extension is malformed. This first
-// native-HDMI contract intentionally does not synthesize SADs from Basic Audio.
+// Require complete EDID and explicit HDMI VSDB. Basic Audio alone permits
+// baseline stereo LPCM only when no audio descriptors are supplied.
+// Never publish partial ELD or override explicit/malformed descriptors.
 inline Eld buildEld(const uint8_t *edid, size_t size) {
     static constexpr uint8_t magic[] {0, 255, 255, 255, 255, 255, 255, 0};
     if (!edid || size < 256 || size != (size_t(edid[126]) + 1) * 128)
@@ -38,7 +39,7 @@ inline Eld buildEld(const uint8_t *edid, size_t size) {
 
     uint8_t sad[45] {};
     unsigned count = 0, revision = 0, speakers = 0;
-    bool hdmi = false, pcm = false;
+    bool hdmi = false, pcm = false, basicAudio = false;
     for (size_t off = 128; off < size; off += 128) {
         const auto *cta = edid + off;
         if (cta[0] != 2)
@@ -52,6 +53,7 @@ inline Eld buildEld(const uint8_t *edid, size_t size) {
             continue;
         if (end < 4 || end > 127)
             return {};
+        basicAudio = basicAudio || (cta[3] & 0x40U);
         for (unsigned i = 4; i < end;) {
             const unsigned tag = cta[i] >> 5, len = cta[i] & 31U;
             ++i;
@@ -82,7 +84,17 @@ inline Eld buildEld(const uint8_t *edid, size_t size) {
             i += len;
         }
     }
-    if (!hdmi || !pcm)
+    if (!hdmi)
+        return {};
+    if (!count && basicAudio) {
+        // CTA Basic Audio: 2-channel LPCM, 32/44.1/48 kHz, 16-bit.
+        sad[0] = 0x09;
+        sad[1] = 0x07;
+        sad[2] = 0x01;
+        count = 1;
+        pcm = true;
+    }
+    if (!pcm)
         return {};
 
     Eld result {};
@@ -241,7 +253,7 @@ inline RouteAdmission admitRoute(const RouteEvidence *candidates, size_t count,
     if (!candidates || !count || count > 16 || !expected.connector ||
         !expected.controller || !expected.epoch ||
         (expected.codecId >> 16) != 0x8086U ||
-        !(expected.codecId & 0xffffU) || expected.codecAddress > 15 ||
+        !(expected.codecId & 0xffffU) || expected.codecAddress > 14 ||
         expected.transcoder > 3 || !expected.nativeHdmi ||
         !expected.connected || !expected.ownershipVerified)
         return RouteAdmission::rejected;
@@ -365,6 +377,40 @@ public:
         return buildStereoDipImage(prepare(acquisitionEpoch, candidates, count,
                                            rate, bits, channels), layout, capacity);
     }
+
+    // The serialized owner supplies a reader bound to this controller and
+    // connector generation, and a pin independently mapped to the display.
+    template<class Reader>
+    DipImage prepareCodecDip(Reader &reader, uint64_t acquisitionEpoch,
+                             const RouteEvidence *candidates, size_t count,
+                             unsigned pin, unsigned rate, unsigned bits,
+                             DipLayout layout, size_t capacity) {
+        const auto image = prepareDip(acquisitionEpoch, candidates, count, rate, bits,
+                                      2, layout, capacity);
+        if (!image.length)
+            return {};
+        HdmiRoute::Route selected {};
+        HdmiRoute::PcmCaps pcm {};
+        if (!HdmiRoute::discover(reader, route_.codecAddress, route_.codecId,
+                                 pin, selected, pcm))
+            return {};
+        // HDA supported PCM rates occupy bits 0..11 starting at 8 kHz.
+        constexpr unsigned rates[] {8000, 11025, 16000, 22050, 32000, 44100,
+                                    48000, 88200, 96000, 176400, 192000, 384000};
+        unsigned rateMask = 0;
+        for (unsigned i = 0; i < sizeof(rates) / sizeof(rates[0]); ++i)
+            if (rates[i] == rate)
+                rateMask = 1U << i;
+        const unsigned depthMask = bits == 16 ? 1U << 17 :
+                                   bits == 20 ? 1U << 18 : 1U << 19;
+        unsigned widget = 0;
+        if (!(pcm.ratesAndDepths & rateMask) || !(pcm.ratesAndDepths & depthMask) ||
+            !reader.get(selected.address, selected.converter, 0xF00, 9, widget) ||
+            widget == 0xFFFFFFFFU || !(widget & 1U))
+            return {};
+        return image;
+    }
+
 };
 } // namespace HDMIAudioPayload
 

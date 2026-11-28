@@ -38,18 +38,23 @@ struct XE {
  struct {bool dsi=true;}adlnOutputWiring;
  uint32_t displayWakeEventBusy=0,displayWakeEventEpoch=0,displayWakeEventErrors=0;
  uint32_t displayWakeEventPhase[3]{};
- bool restoreDisplay13Ports(IOService*){assert(!held);return true;}
+ bool advanceEpochOnPorts=false;
+ bool restoreDisplay13Ports(IOService*,uint32_t epoch){assert(epoch==display13FBPower.restoreEpoch);assert(!held);if(advanceEpochOnPorts)++display13FBPower.restoreEpoch;return true;}
  bool finishDisplay13SystemWake(IOService*,bool=false);
 };
 FUNCTION
 template<class T> void put(IOService &fb,unsigned offset,T value){memcpy(fb.bytes+offset,&value,sizeof(value));}
-unsigned wakes[3]{},ons[3]{}; bool powerThread=true;
+unsigned wakes[3]{},ons[3]{}; bool powerThread=true; uint32_t *advanceOnWake=nullptr, *advanceOnPowerOn=nullptr;
+IOService *removeFromController=nullptr;
 uint32_t event(IOService *fb,int what,void *arg){
  assert(!held);
  if(!powerThread)return 0; // handleEvent's successful no-delivery path
  const auto i=Display13FBMemory::field<uint32_t>(fb,0x1DC);
- if(what==4){assert(arg==reinterpret_cast<void*>(1));++wakes[i];fb->bytes[0x199]|=0x20;}
- else {assert(what==8 && !arg);++ons[i];}
+ if(what==4){assert(arg==reinterpret_cast<void*>(1));++wakes[i];if(advanceOnWake)++*advanceOnWake;fb->bytes[0x199]|=0x20;}
+ else {assert(what==8 && !arg);++ons[i];
+  if(advanceOnPowerOn)++*advanceOnPowerOn;
+  if(removeFromController)put(*removeFromController,0xD60+8*i,static_cast<IOService*>(nullptr));
+ }
  return 0;
 }
 int main(){
@@ -63,6 +68,27 @@ int main(){
   put(fb[0],0x4284,2U);put(fb[1],0x4284,0U);put(fb[2],0x4284,1U);
   if(nativeFirst){event(&fb[1],4,reinterpret_cast<void*>(1));event(&fb[1],8,nullptr);put(fb[1],0x4284,2U);}
  };
+ // An unlocked port handshake can invalidate the captured restore generation.
+ reset(false);xe.advanceEpochOnPorts=true;
+ assert(!xe.finishDisplay13SystemWake(&fb[0]));
+ for(unsigned i=0;i<3;++i)assert(!wakes[i] && !ons[i]);
+ assert(!held && !xe.displayWakeEventBusy);xe.advanceEpochOnPorts=false;
+ assert(xe.finishDisplay13SystemWake(&fb[0]));
+ // A reentrant DidWake starts a new generation before DidPowerOn.
+ reset(false);advanceOnWake=&xe.display13FBPower.restoreEpoch;
+ assert(!xe.finishDisplay13SystemWake(&fb[0]));
+ assert(wakes[0]==1 && !ons[0] && fb[0].refs==1 && !held && !xe.displayWakeEventBusy);
+ advanceOnWake=nullptr;
+ // DidPowerOn can enter a later suspend or detach its framebuffer.
+ for(bool replaceSlot:{false,true}){
+  reset(false);const auto previous=xe.dsiPowerOnEvents;
+  if(replaceSlot)removeFromController=&ctl;
+  else advanceOnPowerOn=&xe.display13FBPower.restoreEpoch;
+  assert(!xe.finishDisplay13SystemWake(&fb[0]));
+  assert(ons[0]==1 && xe.dsiPowerOffNotified && xe.dsiPowerOnEvents==previous);
+  assert(!wakes[2] && fb[0].refs==1 && !held && !xe.displayWakeEventBusy);
+  advanceOnPowerOn=nullptr;removeFromController=nullptr;put(ctl,0xD60,&fb[0]);
+ }
  // Reject undersized callers before interpreting donor-private fields.
  reset(false);fb[0].reportedSize=0x1d0;
  assert(!xe.finishDisplay13SystemWake(&fb[0]) && !wakes[0] && !held && !xe.displayWakeEventBusy);

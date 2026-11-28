@@ -90,7 +90,7 @@ struct XE {
  IOService *adlnTopologyController=nullptr;bool display13PagingLayoutKnown=true;
  uint32_t displayWakeEventBusy=0,displayWakeEventEpoch=0,displayWakeEventErrors=0;
  uint32_t displayWakeEventPhase[3]{};
- bool restoreDisplay13Ports(IOService *ctl){assert(!fbLock.depth && !owner && ctl==adlnTopologyController);return true;}
+ bool restoreDisplay13Ports(IOService *ctl,uint32_t epoch){assert(epoch==display13FBPower.restoreEpoch);assert(!fbLock.depth && !owner && ctl==adlnTopologyController);return true;}
  bool finishDisplay13SystemWake(IOService*,bool=false);
  bool dsiPowerTest=false;struct {bool sleeping=false,failed=false;}dsiRuntimePower;unsigned wakeCalls=0;bool wakeOK=false;
  bool dsiStopTest=false,dsiMemoryReleased=false,dsiDDIReleased=false,stopOK=false;unsigned stopCalls=0;
