@@ -171,6 +171,14 @@ bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
         if(fb->getMetaClass()->getClassSize()<0x4B90 ||
            Display13FBMemory::field<IOService *>(fb,0x1D0)!=controller ||
            Display13FBMemory::field<uint32_t>(fb,0x1DC)!=index){complete=false;fb->release();continue;}
+        // Either notification can reenter the power manager or replace a slot.
+        auto stillOwned = [&]() {
+            IOLockLock(c.lock);
+            const bool current = c.restoreEpoch == epoch &&
+                Display13FBMemory::field<IOService *>(controller,0xD60+8*index) == fb;
+            IOLockUnlock(c.lock);
+            return current;
+        };
         auto &phase=displayWakeEventPhase[index];
         const bool pending=display13PagingLayoutKnown && !(Display13FBMemory::field<uint8_t>(fb,0x199)&0x20);
         // Native peers already notified themselves if paging is active. The
@@ -190,13 +198,7 @@ bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
             events[2]|=1U<<index;
             if(!phase) {
                 events[4+2*index]=event(fb,4,reinterpret_cast<void *>(1));
-                // DidWake can synchronously start another power transition.
-                // Recheck the generation and slot before consuming its result.
-                IOLockLock(c.lock);
-                const bool stillOwned = c.restoreEpoch == epoch &&
-                    Display13FBMemory::field<IOService *>(controller,0xD60+8*index) == fb;
-                IOLockUnlock(c.lock);
-                if (!stillOwned) {
+                if (!stillOwned()) {
                     fb->release();
                     complete = false;
                     break;
@@ -214,6 +216,11 @@ bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
                 // peer has no future transition; DSI also owns its own pair.
                 const bool nativeOn=!internal && (nativePower==1 || (fb==caller && nativePowerOn));
                 events[5+2*index]=nativeOn ? kIOReturnSuccess : event(fb,8,nullptr);
+                if (!nativeOn && !stillOwned()) {
+                    fb->release();
+                    complete = false;
+                    break;
+                }
                 phase=2;
                 if(internal && events[5+2*index]==kIOReturnSuccess && dsiPowerOffNotified) {
                     dsiPowerOffNotified=false;++dsiPowerOnEvents;
