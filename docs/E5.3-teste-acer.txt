@@ -1,0 +1,32 @@
+WhateverXe Enhanced — RC experimental E5.1–E5.3
+Alvo de referência: Acer Aspire A515-57, iGPU 0x46A3, macOS Sequoia.
+Esta RC verifica o lote integrado. A reprodução HDMI e a recuperação após
+suspensão continuam em investigação. Tahoe requer qualificação separada.
+
+1. Extraia o ZIP. No Terminal, na pasta extraída, execute:
+   shasum -a 256 -c SHA256SUMS
+   A identificação do código compilado está em commit.txt.
+2. Faça uma cópia inicializável da EFI que já funciona e confirme que consegue
+   iniciar por ela. Use uma segunda EFI (por exemplo, em um pendrive) para a RC.
+   Na EFI de teste, substitua somente EFI/OC/Kexts/WhateverXe.kext pela kext
+   RELEASE deste pacote. Se já existe a entrada ativa no config.plist com esse
+   caminho, reutilize-a. Mantenha Lilu, AppleALC e o pacote Graphics da base
+   funcional. Não carregue WhateverGreen junto.
+3. Inicie pela EFI de teste. Confira o carregamento:
+   kmutil showloaded | grep -i WhateverXe
+   Para verificar o executável copiado, compare seu SHA-256 com a linha RELEASE
+   de kext-sha256.txt. Use o caminho real do volume EFI de teste.
+4. Na pasta da RC, rode as fases em ordem (o shell expande $HOME):
+   bash tools/validate-e53.sh "$HOME/wex-e53" baseline ./tools/metal_probe
+   Conecte o HDMI, selecione a saída externa em Som e reproduza áudio estéreo.
+   bash tools/validate-e53.sh "$HOME/wex-e53" connected ./tools/metal_probe
+   Desconecte e reconecte o cabo. Confira imagem e som.
+   bash tools/validate-e53.sh "$HOME/wex-e53" reconnected ./tools/metal_probe
+   Suspenda e acorde o Acer com o HDMI conectado. Confira telas, áudio e brilho.
+   bash tools/validate-e53.sh "$HOME/wex-e53" post-wake ./tools/metal_probe
+5. Anote por fase: imagem interna/externa, brilho, áudio HDMI audível,
+   alto-falantes/P2 e qualquer travamento. Se a suspensão falhar, registre a
+   última fase concluída. A saída zero do coletor não comprova áudio audível.
+   Consulte E5.3-validation.md para a seleção da GPU e leitura opcional do codec.
+6. Se perder vídeo, o sistema travar ou o boot falhar, inicie pela EFI anterior.
+   Guarde a pasta wex-e53 e revise os identificadores pessoais antes de compartilhar.

@@ -257,6 +257,28 @@ jobs:
           name: E5.3-validation
           path: build/e53-validation.zip
           if-no-files-found: error
+      - name: Package hardware test RC
+        shell: bash
+        run: |
+          set -euo pipefail
+          rc=build/rc-e53
+          mkdir -p "$rc"
+          cp -R build/e53/. "$rc/"
+          cp docs/E5.3-teste-acer.txt "$rc/TESTE-NO-ACER.txt"
+          archives=(build/dist/WhateverXe-*-RELEASE.zip)
+          test "${#archives[@]}" -eq 1
+          unzip -q "${archives[0]}" 'WhateverXe.kext/*' -d "$rc"
+          expected=$(awk -v archive="$(basename "${archives[0]}")" '$2 == archive {print $1}' "$rc/kext-sha256.txt")
+          actual=$(shasum -a 256 "$rc/WhateverXe.kext/Contents/MacOS/WhateverXe" | cut -d' ' -f1)
+          test "$actual" = "$expected"
+          (cd "$rc" && find . -type f ! -name SHA256SUMS -exec shasum -a 256 {} + > SHA256SUMS &&
+            shasum -a 256 -c SHA256SUMS && zip -qr ../WhateverXe-Enhanced-E5.3-RC.zip .)
+      - name: Upload hardware test RC
+        uses: actions/upload-artifact@v6
+        with:
+          name: WhateverXe-Enhanced-E5.3-RC
+          path: build/WhateverXe-Enhanced-E5.3-RC.zip
+          if-no-files-found: error
       - name: Upload packages
         uses: actions/upload-artifact@v6
         with:
