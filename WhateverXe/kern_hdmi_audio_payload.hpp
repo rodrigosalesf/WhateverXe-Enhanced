@@ -6,6 +6,7 @@
 #ifndef KERN_HDMI_AUDIO_PAYLOAD_HPP
 #define KERN_HDMI_AUDIO_PAYLOAD_HPP
 
+#include "hdmi_route_selection.hpp"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -376,6 +377,40 @@ public:
         return buildStereoDipImage(prepare(acquisitionEpoch, candidates, count,
                                            rate, bits, channels), layout, capacity);
     }
+
+    // The serialized owner supplies a reader bound to this controller and
+    // connector generation, and a pin independently mapped to the display.
+    template<class Reader>
+    DipImage prepareCodecDip(Reader &reader, uint64_t acquisitionEpoch,
+                             const RouteEvidence *candidates, size_t count,
+                             unsigned pin, unsigned rate, unsigned bits,
+                             DipLayout layout, size_t capacity) {
+        const auto image = prepareDip(acquisitionEpoch, candidates, count, rate, bits,
+                                      2, layout, capacity);
+        if (!image.length)
+            return {};
+        HdmiRoute::Route selected {};
+        HdmiRoute::PcmCaps pcm {};
+        if (!HdmiRoute::discover(reader, route_.codecAddress, route_.codecId,
+                                 pin, selected, pcm))
+            return {};
+        // HDA supported PCM rates occupy bits 0..11 starting at 8 kHz.
+        constexpr unsigned rates[] {8000, 11025, 16000, 22050, 32000, 44100,
+                                    48000, 88200, 96000, 176400, 192000, 384000};
+        unsigned rateMask = 0;
+        for (unsigned i = 0; i < sizeof(rates) / sizeof(rates[0]); ++i)
+            if (rates[i] == rate)
+                rateMask = 1U << i;
+        const unsigned depthMask = bits == 16 ? 1U << 17 :
+                                   bits == 20 ? 1U << 18 : 1U << 19;
+        unsigned widget = 0;
+        if (!(pcm.ratesAndDepths & rateMask) || !(pcm.ratesAndDepths & depthMask) ||
+            !reader.get(selected.address, selected.converter, 0xF00, 9, widget) ||
+            widget == 0xFFFFFFFFU || !(widget & 1U))
+            return {};
+        return image;
+    }
+
 };
 } // namespace HDMIAudioPayload
 

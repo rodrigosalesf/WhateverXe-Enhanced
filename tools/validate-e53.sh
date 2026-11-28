@@ -10,6 +10,11 @@ case "$phase" in baseline|connected|reconnected|post-wake) ;; *) exit 2;; esac
 [ -x "$probe" ] || { echo 'Metal probe executable required' >&2; exit 2; }
 mkdir -p "$out"
 dir=$(mktemp -d "$out/$phase.XXXXXXXX")
+# Keep the packaged build identity with each independently collected phase.
+kit=$(cd "$(dirname "$0")/.." && pwd)
+if [ -f "$kit/commit.txt" ] && [ -f "$kit/kext-sha256.txt" ]; then
+    cp "$kit/commit.txt" "$kit/kext-sha256.txt" "$dir/"
+fi
 failed=0
 capture() {
     local name=$1 rc=0; shift

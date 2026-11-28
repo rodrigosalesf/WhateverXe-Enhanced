@@ -31,6 +31,33 @@ static void fixture(uint8_t *edid) {
     checksum(edid + 128);
 }
 
+// One AFG with digital converter 3 and display pin 4 on codec address 2.
+struct StereoCodec {
+    unsigned pcm = (1U << 5) | (1U << 17); // 44.1 kHz, 16-bit.
+    unsigned converter = 0x211; // digital audio output, format override, stereo.
+    unsigned reads = 0;
+    bool get(unsigned address, unsigned node, unsigned verb, unsigned param, unsigned &out) {
+        ++reads;
+        if (address != 2) return false;
+        if (node == 4 && verb == 0xF02 && param == 0) { out = 3; return true; }
+        if (verb != 0xF00) return false;
+        switch ((node << 8) | param) {
+            case 0x000: out = 0x8086281C; break;
+            case 0x004: out = 0x10001; break;
+            case 0x105: out = 1; break;
+            case 0x104: out = 0x30002; break;
+            case 0x409: out = 0x400300; break;
+            case 0x40C: out = 0x90; break;
+            case 0x40E: out = 1; break;
+            case 0x309: out = converter; break;
+            case 0x30A: out = pcm; break;
+            case 0x30B: out = 1; break;
+            default: return false;
+        }
+        return true;
+    }
+};
+
 // Fake synchronous backend. Errors may occur AFTER mutation; ownership loss
 // blocks all later operations. This is not an AppleHDA or MMIO emulator.
 struct FakeDip {
@@ -443,6 +470,27 @@ int main() {
     assert(session.transition(LinkEvent::disconnect));
     assert(!session.prepareDip(live.epoch, &live, 1, 44100, 16, 2,
                                DipLayout::fullHdmi14, 32).length);
+    StereoCodec codec;
+    assert(session.transition(LinkEvent::connect));
+    live.epoch = session.epoch();
+    live.codecAddress = 2;
+    live.codecId = 0x8086281C;
+    assert(session.observe(live, &live, 1, edid, 256));
+    auto fromCodec = [&]() {
+        return session.prepareCodecDip(codec, live.epoch, &live, 1, 4, 44100, 16,
+                                       DipLayout::fullHdmi14, 32);
+    };
+    assert(fromCodec().length == 32);
+    codec.pcm = (1U << 6) | (1U << 17);
+    assert(!fromCodec().length);
+    codec.pcm = (1U << 5) | (1U << 19);
+    assert(!fromCodec().length);
+    codec.pcm = (1U << 5) | (1U << 17);
+    codec.converter &= ~1U;
+    assert(!fromCodec().length);
+    assert(session.transition(LinkEvent::suspend));
+    const auto beforeSuspendQuery = codec.reads;
+    assert(!fromCodec().length && codec.reads == beforeSuspendQuery);
     LinkAudioSession unidentified {0};
     assert(!unidentified.transition(LinkEvent::connect));
 
