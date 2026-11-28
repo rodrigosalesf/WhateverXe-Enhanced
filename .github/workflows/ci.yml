@@ -242,6 +242,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/e53/tools
+          xcrun clang++ -std=c++17 -Wall -Wextra -Werror tools/hdmi_codec_reader.cpp \
+            -framework IOKit -framework CoreFoundation -o build/e53/tools/hdmi_codec_reader
           cp build/diagnostics/metal_probe tools/validate-e53.sh build/e53/tools/
           cp docs/E5.3-validation.md build/e53/
           git rev-parse HEAD > build/e53/commit.txt
