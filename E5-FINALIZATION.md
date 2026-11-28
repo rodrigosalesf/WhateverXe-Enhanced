@@ -2,6 +2,12 @@
 
 **Maintainer decision (2026-11-27):** close E5 on reviewed engineering deliverables and a successful integrated CI, without requiring new physical hardware tests; defer unresolved functional fixes and hardware qualification. This is not authorization to activate unverified audio, power or Metal paths. E6 may begin after the E5 experimental release gate, not after a claim of full physical qualification.
 
+## Current milestone decision (2026-11-28)
+
+- **E5 — experimental graphics baseline.** Close against the integrated baseline and release checks below. Preserve the existing HDMI picture and include external video in regression checks. HDMI sound, reconnect audio and HDMI wake recovery are E7 deliverables. Prior HDMI investigations remain historical evidence.
+- **E6 — Metal 3.** Start from the qualified E5 baseline. Record the current Metal capabilities and run reproducible on-device workloads before enabling or advertising additional features.
+- **E7 — HDMI audio and external display recovery.** Carry forward draft PR #27. First qualify the framebuffer, codec, digital pin and ELD route on each target OS; then implement playback and reconnect; finally verify external display and audio recovery after real sleep. Acceptance on the Acer 46A3 requires audible stereo from the selected HDMI sink, reconnect, successful wake with restored picture and sound, and regression checks for internal panel, analog audio and Metal. Document results separately for Sequoia and Tahoe. HDMI image already observed on the Acer is the video baseline.
+
 ## Scope and evidence
 
 - Base: WhateverXe 0.8.6; compatible Graphics companion 0.4.5 as documented upstream.
