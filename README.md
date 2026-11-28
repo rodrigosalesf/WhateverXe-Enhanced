@@ -102,26 +102,23 @@ Select the target GPU with `--registry-id` when multiple devices are present. A 
 | E2 | Hardware intelligence | Implemented |
 | E3 | Display and diagnostics | Implemented |
 | E4 | Graphics stability and Metal validation | Published; initial hardware validation |
-| E5 | HDMI Audio, Power & Diagnostics | In development; existing 12-module scope preserved |
+| E5 | Graphics stability, power and diagnostics | Experimental release gate |
 | E6 | **Metal 3 & Advanced Graphics** | Planned; revised 10-module sequence |
-| E7 | Multimedia & Hardware Video Acceleration | Planned |
+| E7 | HDMI audio and recovery; multimedia and hardware video acceleration | Planned |
 | E8 | Advanced macOS Graphics Integration | Planned |
 | E9 | Hardware Optimization & Reliability | Planned |
 | E10 | Full Xe-LP Graphics Qualification | Planned |
 
 ### Development sequence and release gates
 
-Finish the existing E5 workstream before beginning E6 development. Do not renumber or remove E5 tasks. The present CI-only phase permits completion of the engineering deliverables and an explicitly experimental candidate, not physical qualification. Track every deferred hardware test, incomplete functional fix and blocker separately; diagnostics and simulated state machines do not count as a working HDMI stream, real power management, or complete driver support. Where a functional fix cannot be safely developed without hardware or donor access, record it as unresolved and retain the existing path. Do not silently close it or declare E5 fully qualified. Any decision to move to E6 with unresolved E5 functional work must be explicitly recorded and approved by the maintainer. No fixed calendar dates are promised.
+Maintainer decision, 2026-11-28: close E5 against the integrated graphics baseline and release checks, then begin E6. Retain working HDMI video as a regression check. Move HDMI audio, reconnection and HDMI wake recovery to E7. Preserve draft PR #27 and historical identifiers for traceability.
 
 For each module: review exact source/donor and licensing, implement a scoped change, run mandatory CPU and regression tests and DEBUG/RELEASE builds on GitHub Actions, review the PR, integrate into the milestone branch, and record evidence and remaining hardware checks. Compile-only, simulated, and physical results must be distinguished. Never bypass failed checks to meet a schedule. Maintain the published E4 baseline and a bootable rollback.
 
-### E5 — retained 12-module sequence
+### E5 — experimental graphics baseline
 
-| Module | Engineering task (unchanged scope) |
+| Module | Engineering task |
 | --- | --- |
-| E5.1 | HDMI Audio Core — identify controller, codec, framebuffer and integration points; implement qualified detection fixes when evidence permits |
-| E5.2 | HDMI Audio Stream Engine — EDID/ELD, PCM, converter/stream routing and real playback |
-| E5.3 | HDMI Hotplug & Recovery — invalidate stale state, reconnect and resume safely |
 | E5.4 | GPU Telemetry Intelligence — counter integrity and reliable activity observations |
 | E5.5 | Dynamic Frequency Management — actual/requested clocks, RP limits, RPS |
 | E5.6 | ForceWake & RC6 Optimization — ownership, bounded access, residency and evidence-based power changes |
@@ -132,7 +129,7 @@ For each module: review exact source/donor and licensing, implement a scoped cha
 | E5.11 | GPU Flight Recorder — bounded optional event history and safe export |
 | E5.12 | Safe Installation & ABI Validation — read-only preflight, provenance and rollback |
 
-### E5 priority: HDMI audio compatibility
+### Deferred to E7 — HDMI audio compatibility
 
 Investigate the HDMI video-without-audio report before changing kernel behavior. Establish the PCI/HDA controller and codec identity, the framebuffer connector and audio routing, EDID audio capabilities and ELD availability where exposed, and AppleHDA/AppleALC integration on the affected setup. Compare upstream and Enhanced with equivalent configuration. Changes should be limited to the component responsible for the failure; WhateverXe alone may not resolve an ACPI, codec, or audio-driver issue.
 
@@ -172,7 +169,9 @@ Dedicate the whole generation to genuine Metal 3 research and advanced graphics 
 
 Metal 3 acceptance requires evidence of the applicable family requirements and successful feature-specific hardware workloads, not simply a positive supportsFamily query. MetalFX and other optional capabilities are not assumed to be mandatory. Study [WhateverXe Graphics source/provenance notes](https://github.com/b00t0x/WhateverXe-Graphics/blob/v0.4.5/docs/SOURCES.md). Its package builder consumes premodified signed payloads; it is not a complete binary modification/signing pipeline. A Graphics Enhanced research workstream must first establish lawful inputs, per-file licensing, reproducible patch contracts and a validated trust chain. Do not change the original backend identity or weaken AMFIAnchor. MeowXE3 remains a comparative reference, not a replacement driver architecture.
 
-### E7 — Multimedia & Hardware Video Acceleration
+### E7 — HDMI audio, recovery and hardware video acceleration
+
+Retain E7.1–E7.6 and add E7.7 (digital codec and route), E7.8 (audible stereo and hotplug) and E7.9 (HDMI wake recovery and regression on Acer 46A3).
 
 | Module | Planned work |
 | --- | --- |
