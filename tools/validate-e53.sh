@@ -23,7 +23,9 @@ capture audio system_profiler SPAudioDataType
 capture loaded kmutil showloaded
 capture registry ioreg -lw0
 capture power pmset -g log
-capture metal "$probe" --iterations 10 --suite advanced
+metal_args=(--iterations 10 --suite advanced)
+if [ -n "${4:-}" ]; then metal_args+=(--registry-id "$4"); fi
+capture metal "$probe" "${metal_args[@]}"
 printf '%s\n' 'Record physical observations separately. Exit zero does not prove HDMI audio or sleep recovery.'
 printf '%s\n' 'Review private data before sharing:' "$dir"
 exit "$failed"

@@ -46,10 +46,10 @@ inline bool select(const Codec *codecs, size_t count, unsigned controller,
     for (size_t i = 0; i < p->count; ++i) {
         unsigned nid = p->connections[i];
         if (!nid || nid > 127 || !nodes[nid] || nid == pin) return false;
+        if (p->selectionKnown && i != p->selectedIndex) continue;
         const auto &w = *nodes[nid];
         // Only direct, unambiguous digital paths are supported.
         if (w.kind != Kind::Converter || !w.digital) return false;
-        if (p->selectionKnown && i != p->selectedIndex) continue;
         if (candidate && candidate != nid) return false;
         candidate = nid;
     }

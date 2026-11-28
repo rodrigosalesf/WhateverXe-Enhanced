@@ -190,6 +190,17 @@ bool XE::finishDisplay13SystemWake(IOService *caller,bool nativePowerOn) {
             events[2]|=1U<<index;
             if(!phase) {
                 events[4+2*index]=event(fb,4,reinterpret_cast<void *>(1));
+                // DidWake can synchronously start another power transition.
+                // Recheck the generation and slot before consuming its result.
+                IOLockLock(c.lock);
+                const bool stillOwned = c.restoreEpoch == epoch &&
+                    Display13FBMemory::field<IOService *>(controller,0xD60+8*index) == fb;
+                IOLockUnlock(c.lock);
+                if (!stillOwned) {
+                    fb->release();
+                    complete = false;
+                    break;
+                }
                 // handleEvent returns Success without delivery on the wrong
                 // power thread. Conversely a subscriber error can follow a
                 // delivered DidWake: never replay that scope-decrement event.

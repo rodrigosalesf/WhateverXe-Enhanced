@@ -106,6 +106,12 @@ int main() {
     w[0].selectionKnown = true;
     w[0].selectedIndex = 1;
     assert(select(c,2,1,0x8086281C,4,out) && out.converter == 5);
+    // A valid but unselected widget need not carry a digital output stream.
+    w[1].digital = false;
+    assert(select(c,2,1,0x8086281C,4,out) && out.converter == 5);
+    w[0].selectedIndex = 0;
+    assert(!select(c,2,1,0x8086281C,4,out));
+    w[1].digital = true;
     w[0].selectedIndex = 2;
     assert(!select(c,2,1,0x8086281C,4,out));
     w[0].selectedIndex = 0;
